@@ -6,7 +6,10 @@ case $- in *i*) ;; *) return ;; esac
 _PORTABLE_TERMINAL_BASH_LOADED=1
 
 # Fedora's /etc/bashrc has its own load guard; don't replace distro defaults.
-if [ -r /etc/bashrc ]; then . /etc/bashrc; fi
+if [ -r /etc/bashrc ]; then
+    # shellcheck source=/dev/null
+    . /etc/bashrc
+fi
 shopt -s histappend checkwinsize
 # shellcheck source=config/shell/common.sh
 . "${XDG_CONFIG_HOME:-$HOME/.config}/portable-terminal/shell/common.sh"
