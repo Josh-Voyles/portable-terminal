@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Read-only checks. Run this in the actual terminal, not just inside an editor.
+set -u
+
+printf 'System: %s / %s\n' "$(uname -s)" "$(uname -m)"
+printf 'Default shell: %s\nTERM: %s\n' "${SHELL:-unknown}" "${TERM:-unset}"
+printf 'Character encoding: %s\n\n' "$(locale charmap 2>/dev/null || printf unknown)"
+
+missing=0
+for tool in git file vim starship eza fzf bat fd rg yazi ya; do
+    if command -v "$tool" >/dev/null 2>&1; then
+        printf 'OK       %-10s %s\n' "$tool" "$(command -v "$tool")"
+    else
+        printf 'MISSING  %s\n' "$tool"
+        missing=$((missing + 1))
+    fi
+done
+
+printf '\nIcons (look for symbols, not boxes or blanks):\n'
+printf '  Folder:    Git:    Python:    Timer: 󱎫   Caps: test\n'
+if command -v fc-match >/dev/null 2>&1; then
+    printf '\nFont available to Linux fontconfig:\n'
+    fc-match 'JetBrainsMono Nerd Font Mono' -f '  %{family}\n'
+fi
+printf '\nSelect "JetBrainsMono Nerd Font Mono" at size 12 in each terminal.\n'
+printf 'Over SSH, install/select the font on the local computer displaying the session.\n'
+
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf '\nRepository branch: '
+    git symbolic-ref --short -q HEAD || git rev-parse --short HEAD
+    if command -v starship >/dev/null 2>&1; then starship module git_branch; printf '\n'; fi
+else
+    printf '\nNot inside a Git repository; hiding the branch here is expected.\n'
+fi
+
+printf '\nOptional Yazi preview helpers (not required for icons):\n'
+for tool in ffmpeg 7zz jq pdftoppm resvg magick; do
+    if command -v "$tool" >/dev/null 2>&1; then
+        printf '  OK       %s\n' "$tool"
+    else
+        printf '  optional %s\n' "$tool"
+    fi
+done
+if [ "$missing" -gt 0 ]; then exit 1; fi

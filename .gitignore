@@ -1,0 +1,49 @@
+# Local environment files (keep shareable examples)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Python bytecode, tool caches, and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Test coverage reports
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Installer backups, caches, and interrupted writes
+backups/
+.cache/
+.portable-terminal.*
+.portable-restore.*
+
+# Logs, temporary files, and patch leftovers
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+# Local editor settings and swap files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
