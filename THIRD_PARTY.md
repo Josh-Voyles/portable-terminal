@@ -4,7 +4,7 @@ These are the maintainers' own documentation and release repositories. They
 define the actual configuration formats and release assets used here, rather
 than relying on a third-party setup script.
 
-- [Starship](https://starship.rs/guide/) documents Bash/Zsh initialization and
+- [Starship](https://starship.rs/guide/) documents Zsh initialization and
   Nerd Font requirements. Linux downloads come from
   [starship/starship](https://github.com/starship/starship/releases).
 - [Yazi installation](https://yazi-rs.github.io/docs/installation/) distinguishes
@@ -18,6 +18,13 @@ than relying on a third-party setup script.
   [catppuccin/Terminal.app](https://github.com/catppuccin/Terminal.app).
 - [Homebrew](https://docs.brew.sh/Manpage) documents formula installation and
   the environment switches used to avoid incidental updates and cleanup.
+- [Zsh's completion system](https://zsh.sourceforge.io/Doc/Release/Completion-System.html)
+  supplies native Tab completion.
+- [zsh-syntax-highlighting 0.8.0](https://github.com/zsh-users/zsh-syntax-highlighting/tree/0.8.0)
+  supplies live command-line highlighting. Its archive is downloaded and
+  SHA256-checked on both platforms. The checksum was cross-checked against
+  Homebrew's upstream formula; its BSD-3-Clause `COPYING.md` is installed
+  alongside the unmodified runtime files. It is loaded after fzf/Starship.
 - The palette and theme settings are adapted from
   [catppuccin/kitty](https://github.com/catppuccin/kitty) and
   [catppuccin/yazi](https://github.com/catppuccin/yazi). Their MIT license is

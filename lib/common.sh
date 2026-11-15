@@ -61,7 +61,12 @@ put_file() {
 
 managed_block() {
     local target=$1 body=$2 generated existing
-    if [ "$DRY_RUN" -eq 1 ]; then log "Would update the managed block in: $target"; return; fi
+    # An empty body removes only our block, without creating or deleting rc files.
+    if [ -z "$body" ]; then
+        [ -f "$target" ] || return 0
+        grep -Fqx -e '# >>> portable-terminal >>>' -e '# <<< portable-terminal <<<' "$target" || return 0
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then log "Would update/remove the managed block in: $target"; return; fi
     generated="$WORK/managed-block"
     existing=/dev/null
     if [ -f "$target" ]; then existing=$target; fi
@@ -80,7 +85,9 @@ managed_block() {
     ' "$existing" > "$generated"; then
         die "Malformed portable-terminal markers in $target; repair them before installing."
     fi
-    printf '%s\n%s\n%s\n' '# >>> portable-terminal >>>' "$body" '# <<< portable-terminal <<<' >> "$generated"
+    if [ -n "$body" ]; then
+        printf '%s\n%s\n%s\n' '# >>> portable-terminal >>>' "$body" '# <<< portable-terminal <<<' >> "$generated"
+    fi
     put_file "$generated" "$target"
 }
 

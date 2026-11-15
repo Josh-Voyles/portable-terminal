@@ -3,11 +3,11 @@
 set -u
 
 printf 'System: %s / %s\n' "$(uname -s)" "$(uname -m)"
-printf 'Default shell: %s\nTERM: %s\n' "${SHELL:-unknown}" "${TERM:-unset}"
+printf 'Inherited SHELL (may be stale): %s\nTERM: %s\n' "${SHELL:-unknown}" "${TERM:-unset}"
 printf 'Character encoding: %s\n\n' "$(locale charmap 2>/dev/null || printf unknown)"
 
 missing=0
-for tool in git file vim starship eza fzf bat fd rg yazi ya; do
+for tool in zsh git file vim starship eza fzf bat fd rg yazi ya; do
     if command -v "$tool" >/dev/null 2>&1; then
         printf 'OK       %-10s %s\n' "$tool" "$(command -v "$tool")"
     else
@@ -15,6 +15,14 @@ for tool in git file vim starship eza fzf bat fd rg yazi ya; do
         missing=$((missing + 1))
     fi
 done
+highlighting="${XDG_CONFIG_HOME:-$HOME/.config}/portable-terminal/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+if [ -r "$highlighting" ]; then
+    printf 'OK       syntax highlighting %s\n' "$highlighting"
+else
+    printf 'MISSING  syntax highlighting (rerun the installer)\n'
+    missing=$((missing + 1))
+fi
+printf 'Start a fresh Zsh session with: zsh -l\n'
 
 printf '\nIcons (look for symbols, not boxes or blanks):\n'
 printf '  Folder:    Git:    Python:    Timer: 󱎫   Caps: test\n'

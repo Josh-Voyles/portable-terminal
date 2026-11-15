@@ -8,7 +8,33 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    container: node:24.22.2-trixie-slim
     steps:
+      - name: Install test prerequisites inside the disposable container
+        shell: bash
+        run: |
+          if [ ! -f /.dockerenv ] && [ ! -f /run/.containerenv ]; then
+            echo "These checks must run in a disposable container, not on the runner host." >&2
+            exit 1
+          fi
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zsh python3 shellcheck curl ca-certificates git passwd unzip xz-utils
       - uses: https://github.com/actions/checkout@v4
       - name: Lint and offline tests
         run: bash scripts/check.sh
+      - name: Real Zsh install and login-shell smoke test
+        shell: bash
+        run: |
+          # This changes only the disposable container's root account.
+          chsh -s /bin/bash
+          export HOME="$(mktemp -d)"
+          export TERM=xterm-256color
+          bash install.sh --config-only --no-terminals --no-yazi --make-default-shell
+          test "$(getent passwd "$(id -u)" | cut -d: -f7)" = "$(command -v zsh)"
+          zsh -d -ic '
+            setopt ERR_EXIT
+            (( $+functions[compdef] && $+functions[_zsh_highlight] ))
+            [[ $ZSH_HIGHLIGHT_VERSION == 0.8.0 && $EDITOR == vim ]]
+            [[ $(bindkey -lL main) == "bindkey -A emacs main" ]]
+          '
+          bash install.sh --config-only --no-terminals --no-yazi --make-default-shell

@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import pty
+import re
 import shutil
 import stat
 import subprocess
@@ -19,6 +21,9 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASH = os.environ.get("TEST_BASH") or shutil.which("bash")
+ZSH = shutil.which("zsh")
+if not ZSH:
+    raise RuntimeError("Zsh is required for the tests; install it before running checks.")
 
 
 class InstallerTests(unittest.TestCase):
@@ -42,9 +47,31 @@ class InstallerTests(unittest.TestCase):
             "LC_ALL": "C",
             "MOCK_LOG": str(self.log),
         }
+        # Account changes are always simulated, regardless of the host's shell.
+        self.account = self.base / "login-shell"
+        self.account.write_text(ZSH + "\n")
+        self.env["MOCK_ACCOUNT"] = str(self.account)
+        self.shim("getent", 'printf "test:x:1000:1000:Test:%s:%s\\n" "$HOME" "$(cat "$MOCK_ACCOUNT")"')
+        self.shim("dscacheutil", 'printf "shell: %s\\n" "$(cat "$MOCK_ACCOUNT")"')
+        self.shim("chsh", 'printf "chsh %s\\n" "$*" >> "$MOCK_LOG"\nprintf "%s\\n" "$2" > "$MOCK_ACCOUNT"')
+        self.plugin = self.base / "highlighting.tar.gz"
+        with tarfile.open(self.plugin, "w:gz") as bundle:
+            for name, content in {
+                "zsh-syntax-highlighting.zsh": "_zsh_highlight() { :; }\ntypeset -g TEST_HIGHLIGHT_COUNT=$(( ${TEST_HIGHLIGHT_COUNT:-0} + 1 ))\n",
+                ".version": "0.8.0\n",
+                ".revision-hash": "fixture\n",
+                "COPYING.md": "fixture license\n",
+                "highlighters/main/main-highlighter.zsh": "# fixture\n",
+            }.items():
+                payload = content.encode()
+                entry = tarfile.TarInfo("zsh-syntax-highlighting-0.8.0/" + name)
+                entry.size = len(payload)
+                bundle.addfile(entry, io.BytesIO(payload))
+        self.env["MOCK_PLUGIN"] = str(self.plugin)
+        self.repo = self.copy_repo()
         # Tests never touch the host's font caches or fetch anything from GitHub.
         self.shim("fc-cache", 'printf "fc-cache\\n" >> "$MOCK_LOG"')
-        self.shim("curl", 'printf "unexpected curl\\n" >&2; exit 98')
+        self.curl_shim('printf "unexpected curl\\n" >&2; exit 98')
         self.shim("uname", 'case "$1" in -s) echo "${MOCK_OS:-Linux}" ;; -m) echo "${MOCK_ARCH:-x86_64}" ;; esac')
 
     def shim(self, name, body):
@@ -52,7 +79,19 @@ class InstallerTests(unittest.TestCase):
         path.write_text("#!/bin/sh\n" + body + "\n")
         path.chmod(0o755)
 
-    def run_script(self, script, *args, root=ROOT, expected=0):
+    def curl_shim(self, body):
+        self.shim("curl", '''for arg do
+    case "$arg" in
+        *zsh-syntax-highlighting*)
+            while [ "$1" != --output ]; do shift; done
+            cp "$MOCK_PLUGIN" "$2"
+            exit 0 ;;
+    esac
+done
+''' + body)
+
+    def run_script(self, script, *args, root=None, expected=0):
+        root = root or self.repo
         result = subprocess.run(
             [BASH, str(root / script), *map(str, args)],
             env=self.env,
@@ -78,8 +117,14 @@ class InstallerTests(unittest.TestCase):
         }
 
     def copy_repo(self):
-        target = self.base / "checkout with spaces"
-        shutil.copytree(ROOT, target, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        target = Path(tempfile.mkdtemp(prefix="checkout with spaces-", dir=self.base))
+        shutil.copytree(ROOT, target, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        packages = target / "lib/packages.sh"
+        packages.write_text(re.sub(
+            r"(?m)^ZSH_HIGHLIGHT_SHA256=.*$",
+            "ZSH_HIGHLIGHT_SHA256=" + hashlib.sha256(self.plugin.read_bytes()).hexdigest(),
+            packages.read_text(),
+        ))
         return target
 
     def fixture_download(self, repo, *, zip_archive=False, checksum=None):
@@ -102,16 +147,132 @@ class InstallerTests(unittest.TestCase):
             f"{tool}|x86_64|{digest}|https://example.invalid/{archive.name}|{binaries}\n"
         )
         self.env["MOCK_DOWNLOAD"] = str(archive)
-        self.shim("curl", 'printf "download\\n" >> "$MOCK_LOG"\nwhile [ "$1" != --output ]; do shift; done\ncp "$MOCK_DOWNLOAD" "$2"')
+        self.curl_shim('printf "download\\n" >> "$MOCK_LOG"\nwhile [ "$1" != --output ]; do shift; done\ncp "$MOCK_DOWNLOAD" "$2"')
         return archive
 
     def test_help_and_invalid_options_dont_write(self):
         self.run_script("install.sh", "--help")
         self.assertEqual(self.snapshot(), {})
         self.run_script("install.sh", "--not-an-option", expected=1)
-        self.run_script("install.sh", "--shell", expected=1)
+        self.run_script("install.sh", "--make-default-shell", "--keep-default-shell", expected=1)
         self.run_script("install.sh", "--shell", "fish", expected=1)
         self.assertEqual(self.snapshot(), {})
+
+    def test_missing_zsh_fails_before_any_writes_even_in_dry_run(self):
+        (self.tools / "dirname").symlink_to(shutil.which("dirname"))
+        self.env["PATH"] = str(self.tools)  # No Zsh; Bash itself is invoked by absolute path.
+        for args in [(), ("--dry-run",)]:
+            result = self.install(*args, expected=1)
+            self.assertIn("Zsh must already be installed", result.stderr)
+            self.assertEqual(self.snapshot(), {})
+            self.assertEqual(list(self.tmp.iterdir()), [])
+            self.assertFalse(self.log.exists())
+
+    def test_noninteractive_install_requires_a_shell_choice(self):
+        self.account.write_text(BASH + "\n")
+        self.env["SHELL"] = ZSH  # Must not be mistaken for the account record.
+        result = self.install(expected=1)
+        self.assertIn("--keep-default-shell", result.stderr)
+        self.assertEqual(self.snapshot(), {})
+        self.assertFalse(self.log.exists())
+
+    def test_keep_default_shell_does_not_require_account_lookup(self):
+        self.shim("getent", "exit 1")
+        self.install("--keep-default-shell")
+        self.assertTrue((self.home / ".zshrc").exists())
+        self.assertFalse(self.log.exists())
+
+    def test_missing_chsh_is_reported_before_writes(self):
+        self.account.write_text(BASH + "\n")
+        (self.tools / "chsh").unlink()
+        for name in ["dirname", "zsh", "id", "awk", "date", "cat"]:
+            (self.tools / name).symlink_to(shutil.which(name))
+        self.env["PATH"] = str(self.tools)
+        result = self.install("--make-default-shell", expected=1)
+        self.assertIn("Required command not found: chsh", result.stderr)
+        self.assertEqual(self.snapshot(), {})
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
+    def test_mac_account_lookup_preserves_shell_path_with_spaces(self):
+        self.env["MOCK_OS"] = "Darwin"
+        other = self.base / "another zsh installation" / "zsh"
+        other.parent.mkdir()
+        other.symlink_to(ZSH)
+        self.account.write_text(str(other) + "\n")
+        self.install("--make-default-shell")
+        self.assertFalse(self.log.exists())
+
+    def test_default_shell_change_is_last_and_restore_is_file_only(self):
+        self.account.write_text(BASH + "\n")
+        self.shim("chsh", '''test -f "$HOME/.zshrc" || exit 90
+printf "chsh\\n" >> "$MOCK_LOG"
+printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
+        self.install("--make-default-shell")
+        backup = self.backups()[0]
+        self.assertTrue(os.path.samefile(self.account.read_text().strip(), ZSH))
+        self.assertEqual((backup / "previous-shell").read_text().strip(), BASH)
+        restored = self.run_script("restore.sh", backup)
+        self.assertIn("To switch back manually: chsh", restored.stdout)
+        self.assertTrue(os.path.samefile(self.account.read_text().strip(), ZSH))
+        self.assertEqual(self.log.read_text().count("chsh"), 1)
+
+    def test_shell_only_backup_can_be_used_without_a_file_manifest(self):
+        self.install()
+        self.account.write_text(BASH + "\n")
+        self.install("--make-default-shell")
+        backup = next(p for p in self.backups() if (p / "previous-shell").exists())
+        self.assertFalse((backup / "manifest.tsv").exists())
+        result = self.run_script("restore.sh", backup)
+        self.assertIn("Login shell was not restored", result.stdout)
+
+    def test_already_default_zsh_is_not_changed_even_at_another_path(self):
+        other = self.base / "another zsh installation" / "zsh"
+        other.parent.mkdir()
+        other.symlink_to(ZSH)
+        self.account.write_text(str(other) + "\n")
+        self.env["SHELL"] = BASH
+        self.install("--make-default-shell")
+        self.assertFalse(self.log.exists())
+        self.assertFalse((self.backups()[0] / "previous-shell").exists())
+
+    def test_shell_change_dry_run_never_prompts_or_changes_account(self):
+        self.account.write_text(BASH + "\n")
+        for args in [(), ("--make-default-shell",)]:
+            self.install("--dry-run", *args)
+            self.assertEqual(self.account.read_text().strip(), BASH)
+            self.assertEqual(self.snapshot(), {})
+            self.assertFalse(self.log.exists())
+
+    def test_failed_or_unverified_shell_change_reports_failure_and_keeps_config(self):
+        self.account.write_text(BASH + "\n")
+        for status in [1, 0]:
+            with self.subTest(status=status):
+                self.shim("chsh", f"exit {status}")  # Success without an account update isn't success.
+                result = self.install("--make-default-shell", expected=1)
+                self.assertIn("Installed configuration was kept", result.stderr)
+                self.assertIn("Private backups:", result.stdout)
+                self.assertTrue((self.home / ".zshrc").exists())
+                self.assertEqual(self.account.read_text().strip(), BASH)
+
+    def test_interactive_shell_prompt_defaults_to_no_and_accepts_yes(self):
+        self.account.write_text(BASH + "\n")
+        for answer in ["", "yes"]:
+            master, slave = pty.openpty()
+            try:
+                process = subprocess.Popen(
+                    [BASH, str(self.repo / "install.sh"), "--config-only"],
+                    stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=self.env, text=True,
+                )
+                os.write(master, (answer + "\n").encode())
+                stdout, stderr = process.communicate(timeout=30)
+                self.assertEqual(process.returncode, 0, stdout + stderr)
+                self.assertIn("[y/N]", stdout)
+            finally:
+                os.close(master)
+                os.close(slave)
+            self.assertTrue(os.path.samefile(self.account.read_text().strip(), ZSH if answer else BASH))
+            self.assertEqual(self.log.exists(), bool(answer))
 
     def test_dry_run_is_offline_and_writes_nothing(self):
         result = self.run_script("install.sh", "--dry-run", "--reinstall-tools")
@@ -123,8 +284,11 @@ class InstallerTests(unittest.TestCase):
 
     def test_config_only_installs_all_shared_files(self):
         self.install()
-        for name in [".bashrc", ".bash_profile", ".zshrc", ".config/yazi/theme.toml", ".local/bin/terminal-doctor"]:
+        for name in [".zshrc", ".config/portable-terminal/shell/zsh.zsh", ".config/yazi/theme.toml", ".local/bin/terminal-doctor",
+                     ".config/portable-terminal/plugins/zsh-syntax-highlighting/highlighters/main/main-highlighter.zsh"]:
             self.assertTrue((self.home / name).is_file(), name)
+        for name in [".bashrc", ".bash_profile", ".bash_login", ".profile"]:
+            self.assertFalse((self.home / name).exists(), name)
         self.assertFalse((self.home / ".config/starship.toml").exists())
         self.assertEqual((self.home / ".config/portable-terminal/starship.toml").read_bytes(), (ROOT / "config/starship.toml").read_bytes())
         self.assertTrue(os.access(self.home / ".local/bin/terminal-doctor", os.X_OK))
@@ -136,7 +300,35 @@ class InstallerTests(unittest.TestCase):
         self.install()
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.backups(), before_backups)
-        self.assertEqual((self.home / ".bashrc").read_text().count("# >>> portable-terminal >>>"), 1)
+        self.assertEqual((self.home / ".zshrc").read_text().count("# >>> portable-terminal >>>"), 1)
+
+    def test_legacy_bash_hooks_are_removed_without_deleting_dotfiles_and_can_be_restored(self):
+        content = "# keep this\n# >>> portable-terminal >>>\nexit 99\n# <<< portable-terminal <<<\n# keep that\n"
+        for name in [".bashrc", ".bash_profile", ".bash_login", ".profile"]:
+            (self.home / name).write_text(content)
+        self.install()
+        backup = self.backups()[0]
+        for name in [".bashrc", ".bash_profile", ".bash_login", ".profile"]:
+            self.assertEqual((self.home / name).read_text(), "# keep this\n# keep that\n")
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+        self.run_script("restore.sh", backup)
+        for name in [".bashrc", ".bash_profile", ".bash_login", ".profile"]:
+            self.assertEqual((self.home / name).read_text(), content)
+
+    def test_legacy_bash_symlink_and_malformed_markers_remain_protected(self):
+        original = self.home / "original bashrc"
+        original.write_text("# >>> portable-terminal >>>\nold hook\n# <<< portable-terminal <<<\n")
+        startup = self.home / ".bashrc"
+        startup.symlink_to(original)
+        self.install()
+        self.assertEqual(startup.read_text(), "")
+        self.assertIn("old hook", original.read_text())
+        self.run_script("restore.sh", self.backups()[0])
+        self.assertTrue(startup.is_symlink())
+        original.write_text("# >>> portable-terminal >>>\nunclosed\n")
+        self.install(expected=1)
+        self.assertEqual(original.read_text(), "# >>> portable-terminal >>>\nunclosed\n")
 
     def test_preserves_user_content_without_sourcing_or_printing_it(self):
         content = "# pretend credential: test-only-not-a-real-secret\nexit 99\n"
@@ -154,13 +346,13 @@ class InstallerTests(unittest.TestCase):
         self.install()
         self.assertFalse((self.home / ".bash_profile").exists())
         self.assertIn("KEEP_ME", (self.home / ".bash_login").read_text())
-        self.assertIn("portable-terminal", (self.home / ".bash_login").read_text())
+        self.assertNotIn("portable-terminal", (self.home / ".bash_login").read_text())
 
-    def test_profile_is_guarded_for_non_bash_shells(self):
+    def test_unmanaged_profile_is_untouched(self):
         (self.home / ".profile").write_text("export KEEP_ME=yes\n")
         self.install()
         self.assertFalse((self.home / ".bash_profile").exists())
-        self.assertIn('"${BASH_VERSION-}"', (self.home / ".profile").read_text())
+        self.assertEqual((self.home / ".profile").read_text(), "export KEEP_ME=yes\n")
 
     def test_custom_xdg_zdotdir_and_yazi_paths(self):
         self.env.update(
@@ -182,20 +374,20 @@ class InstallerTests(unittest.TestCase):
 
     def test_rejects_unclosed_managed_marker(self):
         content = "# >>> portable-terminal >>>\nimportant user content\n"
-        (self.home / ".bashrc").write_text(content)
+        (self.home / ".zshrc").write_text(content)
         self.install(expected=1)
-        self.assertEqual((self.home / ".bashrc").read_text(), content)
+        self.assertEqual((self.home / ".zshrc").read_text(), content)
 
     def test_rejects_duplicate_managed_markers(self):
         content = "# >>> portable-terminal >>>\n# <<< portable-terminal <<<\n" * 2
-        (self.home / ".bashrc").write_text(content)
+        (self.home / ".zshrc").write_text(content)
         self.install(expected=1)
-        self.assertEqual((self.home / ".bashrc").read_text(), content)
+        self.assertEqual((self.home / ".zshrc").read_text(), content)
 
     def test_updates_old_managed_block_without_duplicates(self):
-        (self.home / ".bashrc").write_text("keep this\n# >>> portable-terminal >>>\nold hook\n# <<< portable-terminal <<<\nkeep that\n")
+        (self.home / ".zshrc").write_text("keep this\n# >>> portable-terminal >>>\nold hook\n# <<< portable-terminal <<<\nkeep that\n")
         self.install()
-        content = (self.home / ".bashrc").read_text()
+        content = (self.home / ".zshrc").read_text()
         self.assertIn("keep this\nkeep that\n", content)
         self.assertNotIn("old hook", content)
         self.assertEqual(content.count("# >>> portable-terminal >>>"), 1)
@@ -203,7 +395,7 @@ class InstallerTests(unittest.TestCase):
     def test_symlink_is_backed_up_without_changing_its_target(self):
         original = self.home / "original rc"
         original.write_text("# original\n")
-        startup = self.home / ".bashrc"
+        startup = self.home / ".zshrc"
         startup.symlink_to(original)
         self.install()
         self.assertFalse(startup.is_symlink())
@@ -213,21 +405,22 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(os.readlink(startup), str(original))
 
     def test_opt_out_flags_leave_unselected_components_alone(self):
-        self.install("--shell", "none", "--no-terminals", "--no-yazi")
-        for name in [".bashrc", ".bash_profile", ".zshrc", ".config/kitty", ".config/yazi"]:
+        self.install("--no-terminals", "--no-yazi")
+        for name in [".bashrc", ".bash_profile", ".config/kitty", ".config/yazi"]:
             self.assertFalse((self.home / name).exists(), name)
+        self.assertTrue((self.home / ".zshrc").exists())
 
     def test_restores_originals_and_removes_new_files(self):
         original = "# keep my config\n"
-        (self.home / ".bashrc").write_text(original)
+        (self.home / ".zshrc").write_text(original)
         self.install()
         self.run_script("restore.sh", self.backups()[0])
-        self.assertEqual((self.home / ".bashrc").read_text(), original)
-        self.assertFalse((self.home / ".zshrc").exists())
+        self.assertEqual((self.home / ".zshrc").read_text(), original)
+        self.assertFalse((self.home / ".config/portable-terminal/shell/zsh.zsh").exists())
         self.assertFalse((self.home / ".local/bin/terminal-doctor").exists())
 
     def test_restore_preserves_later_edits_unless_forced(self):
-        startup = self.home / ".bashrc"
+        startup = self.home / ".zshrc"
         startup.write_text("# original\n")
         self.install()
         startup.write_text("# edited after installation\n")
@@ -328,7 +521,7 @@ class InstallerTests(unittest.TestCase):
         self.fixture_download(repo, checksum="0" * 64)
         result = self.run_script("install.sh", "--no-fonts", "--reinstall-tools", root=repo, expected=1)
         self.assertIn("SHA256 verification failed", result.stderr)
-        self.assertFalse((self.home / ".bashrc").exists())
+        self.assertFalse((self.home / ".zshrc").exists())
         self.assertFalse((self.home / ".local/bin/starship").exists())
 
     def test_invalid_cached_checksum_is_rejected(self):
@@ -340,47 +533,130 @@ class InstallerTests(unittest.TestCase):
         cache.write_text("tampered cache")
         result = self.run_script("install.sh", "--no-fonts", "--reinstall-tools", root=repo, expected=1)
         self.assertIn("wrong SHA256", result.stderr)
-        self.assertFalse((self.home / ".bashrc").exists())
+        self.assertFalse((self.home / ".zshrc").exists())
         self.assertFalse(self.log.exists())
+
+    def test_highlighting_checksum_is_checked_and_cached_downloads_are_offline(self):
+        packages = self.repo / "lib/packages.sh"
+        good = packages.read_text()
+        packages.write_text(re.sub(r"(?m)^ZSH_HIGHLIGHT_SHA256=.*$", "ZSH_HIGHLIGHT_SHA256=" + "0" * 64, good))
+        result = self.install(expected=1)
+        self.assertIn("SHA256 verification failed", result.stderr)
+        self.assertFalse((self.home / ".zshrc").exists())
+        packages.write_text(good)
+        self.install()
+        self.shim("curl", "exit 98")  # A repeat config-only install must use the verified cache.
+        self.install()
+        cached = next((self.home / ".cache/portable-terminal").glob("*0.8.0.tar.gz"))
+        cached.write_text("tampered")
+        result = self.install(expected=1)
+        self.assertIn("wrong SHA256", result.stderr)
 
     def test_noninteractive_shell_config_does_nothing(self):
         self.install()
         result = subprocess.run(
-            [BASH, "--noprofile", "--norc", "-c", '. "$HOME/.config/portable-terminal/shell/bash.sh"; printf "%s" "${STARSHIP_CONFIG-unset}"'],
+            [ZSH, "-df", "-c", '. "$HOME/.config/portable-terminal/shell/zsh.zsh"; printf "%s" "${STARSHIP_CONFIG-unset}"'],
             env=self.env, capture_output=True, text=True, check=True,
         )
         self.assertEqual(result.stdout, "unset")
 
-    def test_interactive_bash_sets_prompt_and_aliases_once(self):
+    def test_dumb_terminal_does_not_load_configuration(self):
         self.install()
-        self.env["STARSHIP_SHELL"] = "bash"  # inherited from a parent shell
-        self.shim("starship", 'printf "export STARSHIP_SHELL=bash\\n"')
-        self.shim("fzf", 'printf "export TEST_FZF_READY=yes\\n"')
-        self.shim("eza", 'exit 0')
+        self.env["TERM"] = "dumb"
         result = subprocess.run(
-            [BASH, "--noprofile", "--rcfile", str(self.home / ".bashrc"), "-ic",
-             '. "$HOME/.bashrc"; alias ll; printf "PROMPT=%s FZF=%s EDITOR=%s\\n" "$STARSHIP_SHELL" "$TEST_FZF_READY" "$EDITOR"'],
-            env=self.env, capture_output=True, text=True, timeout=15,
+            [ZSH, "-d", "-ic", 'printf "%s" "${STARSHIP_CONFIG-unset}"'],
+            env=self.env, capture_output=True, text=True, check=True,
         )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("eza --long --all --git", result.stdout)
-        self.assertIn("PROMPT=bash FZF=yes EDITOR=vim", result.stdout)
+        self.assertEqual(result.stdout, "unset")
+        self.assertFalse((self.home / ".local/state/zsh").exists())
 
-    @unittest.skipUnless(shutil.which("zsh"), "Zsh is not installed")
     def test_interactive_zsh_sets_prompt_and_aliases_once(self):
         self.install()
         self.env["STARSHIP_SHELL"] = "zsh"
-        self.shim("starship", 'printf "export STARSHIP_SHELL=zsh\\n"')
-        self.shim("fzf", 'printf "export TEST_FZF_READY=yes\\n"')
+        self.env["EDITOR"] = "vim"  # A nested shell must still use emacs editing.
+        self.shim("starship", '''[ "$*" = "init zsh" ] || exit 90
+cat <<'EOF'
+prompt_starship_precmd() { :; }
+export STARSHIP_SHELL=zsh
+typeset -g TEST_STARSHIP_COUNT=$(( ${TEST_STARSHIP_COUNT:-0} + 1 ))
+EOF''')
+        self.shim("fzf", '''[ "$*" = "--zsh" ] || exit 90
+cat <<'EOF'
+export TEST_FZF_READY=yes
+typeset -g TEST_FZF_COUNT=$(( ${TEST_FZF_COUNT:-0} + 1 ))
+EOF''')
         self.shim("eza", 'exit 0')
         result = subprocess.run(
-            [shutil.which("zsh"), "-d", "-i", "-c",
-             '. "$HOME/.zshrc"; alias ll; printf "PROMPT=%s FZF=%s EDITOR=%s\\n" "$STARSHIP_SHELL" "$TEST_FZF_READY" "$EDITOR"'],
+            [ZSH, "-d", "-i", "-c",
+             '. "$HOME/.zshrc"; alias ll; bindkey -lL main; '
+             'printf "PROMPT=%s FZF=%s EDITOR=%s COUNTS=%s/%s/%s\\n" "$STARSHIP_SHELL" "$TEST_FZF_READY" "$EDITOR" '
+             '"$TEST_STARSHIP_COUNT" "$TEST_FZF_COUNT" "$TEST_HIGHLIGHT_COUNT"; '
+             '(( $+functions[compdef] )) && print COMPLETION=yes; '
+             'print HISTORY=$HISTSIZE/$SAVEHIST/$options[incappendhistory]/$options[sharehistory]'],
             env=self.env, capture_output=True, text=True, timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("eza --long --all --git", result.stdout)
         self.assertIn("PROMPT=zsh FZF=yes EDITOR=vim", result.stdout)
+        self.assertIn("COUNTS=1/1/1", result.stdout)
+        self.assertIn("bindkey -A emacs main", result.stdout)
+        self.assertIn("COMPLETION=yes", result.stdout)
+        self.assertIn("HISTORY=50000/50000/on/off", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_zsh_history_survives_sessions_without_importing_bash_history(self):
+        self.install()
+        (self.home / ".bash_history").write_text("old-bash-history-token\n")
+        result = subprocess.run(
+            [ZSH, "-d", "-i"], input="print -r -- saved-zsh-history-token\n print private-history-token\nexit\n",
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        history = self.home / ".local/state/zsh/history"
+        self.assertIn("saved-zsh-history-token", history.read_text())
+        self.assertNotIn("private-history-token", history.read_text())
+        self.assertEqual(stat.S_IMODE(history.parent.stat().st_mode), 0o700)
+        result = subprocess.run(
+            [ZSH, "-d", "-i"], input="fc -l 1\nexit\n",
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertIn("saved-zsh-history-token", result.stdout)
+        self.assertNotIn("old-bash-history-token", result.stdout)
+
+    def test_existing_history_file_location_is_preserved(self):
+        custom = self.home / "existing history"
+        (self.home / ".zshrc").write_text('HISTFILE="$HOME/existing history"\n')
+        self.install()
+        result = subprocess.run(
+            [ZSH, "-d", "-ic", 'print -r -- "$HISTFILE"'], env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.stdout.strip(), str(custom))
+
+    def test_yazi_wrapper_preserves_arguments_exit_status_and_directory_change(self):
+        self.install()
+        target = self.home / "directory with 'quotes' and spaces"
+        target.mkdir()
+        self.env["MOCK_CWD"] = str(target)
+        self.shim("yazi", '''printf "%s\\n" "$@" >> "$MOCK_LOG"
+for arg do
+    case "$arg" in --cwd-file=*) printf "%s" "$MOCK_CWD" > "${arg#--cwd-file=}" ;; esac
+done
+exit 7''')
+        result = subprocess.run(
+            [ZSH, "-d", "-ic", 'y "argument with spaces"; result=$?; print -r -- "PWD=$PWD"; print RESULT=$result'],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PWD=" + str(target), result.stdout)
+        self.assertIn("RESULT=7", result.stdout)
+        self.assertIn("argument with spaces", self.log.read_text())
+        self.assertEqual(list(self.tmp.glob("yazi-cwd.*")), [])
+        self.env["MOCK_CWD"] = ""  # Yazi's Q behavior.
+        result = subprocess.run(
+            [ZSH, "-d", "-ic", 'before=$PWD; y; [[ $PWD == "$before" ]]'],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 class RepositoryTests(unittest.TestCase):
@@ -409,8 +685,9 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual([p.read_bytes() for p in paths], before)
 
     def test_shell_scripts_parse(self):
-        for script in ["install.sh", "restore.sh", "lib/common.sh", "lib/packages.sh", "config/shell/common.sh", "config/shell/bash.sh", "bin/terminal-doctor"]:
+        for script in ["install.sh", "restore.sh", "lib/common.sh", "lib/packages.sh", "scripts/check.sh", "bin/terminal-doctor"]:
             subprocess.run([BASH, "-n", str(ROOT / script)], check=True)
+        subprocess.run([ZSH, "-n", str(ROOT / "config/shell/zsh.zsh")], check=True)
 
 
 if __name__ == "__main__":
