@@ -160,7 +160,7 @@ done
         ))
         return target
 
-    def fixture_download(self, repo, *, zip_archive=False, checksum=None):
+    def fixture_download(self, repo, *, zip_archive=False, checksum=None, tool="starship"):
         archive = self.base / ("asset.zip" if zip_archive else "asset.tar.gz")
         payload = b"#!/bin/sh\nprintf 'fixture tool\\n'\n"
         if zip_archive:
@@ -170,11 +170,11 @@ done
             tool, binaries = "yazi", "yazi ya"
         else:
             with tarfile.open(archive, "w:gz") as bundle:
-                entry = tarfile.TarInfo("release/starship")
+                entry = tarfile.TarInfo("release/" + tool)
                 entry.size = len(payload)
                 entry.mode = 0o755
                 bundle.addfile(entry, io.BytesIO(payload))
-            tool, binaries = "starship", "starship"
+            binaries = tool
         digest = checksum or hashlib.sha256(archive.read_bytes()).hexdigest()
         (repo / "packages.lock").write_text(
             f"{tool}|x86_64|{digest}|https://example.invalid/{archive.name}|{binaries}\n"
@@ -310,6 +310,7 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
     def test_dry_run_is_offline_and_writes_nothing(self):
         result = self.run_script("install.sh", "--dry-run", "--reinstall-tools")
         self.assertIn("Would install starship", result.stdout)
+        self.assertIn("Would install zoxide", result.stdout)
         self.assertIn("Would install fzf-tab 1.3.0", result.stdout)
         self.assertIn("Nothing was changed or downloaded", result.stdout)
         self.assertEqual(self.snapshot(), {})
@@ -515,7 +516,7 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
         self.shim("brew", 'if [ "$1" = list ]; then exit 1; fi\nprintf "%s\\n" "$*" >> "$MOCK_LOG"')
         self.run_script("install.sh", "--no-fonts", "--reinstall-tools")
         calls = self.log.read_text()
-        for formula in ["starship", "eza", "fzf", "bat", "fd", "ripgrep", "yazi"]:
+        for formula in ["starship", "eza", "fzf", "bat", "fd", "ripgrep", "yazi", "zoxide"]:
             self.assertIn("install --formula " + formula, calls)
 
     def test_ptyxis_font_changes_have_restore_records(self):
@@ -557,6 +558,18 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
         self.run_script("install.sh", "--no-fonts", "--reinstall-tools", root=repo)
         self.assertTrue((self.home / ".local/bin/yazi").is_file())
         self.assertTrue((self.home / ".local/bin/ya").is_file())
+
+    def test_zoxide_download_is_installed_and_existing_command_is_kept(self):
+        self.fixture_download(self.repo, tool="zoxide")
+        self.shim("zoxide", 'exit 0')
+        result = self.run_script("install.sh", "--no-fonts")
+        self.assertIn("Keeping existing: zoxide", result.stdout)
+        binary = self.home / ".local/bin/zoxide"
+        self.assertFalse(binary.exists())
+        self.run_script("install.sh", "--no-fonts", "--reinstall-tools")
+        self.assertTrue(binary.is_file())
+        self.assertEqual(stat.S_IMODE(binary.stat().st_mode), 0o755)
+        self.assertEqual(self.log.read_text().count("download"), 1)
 
     def test_bad_download_checksum_is_rejected_before_dotfile_changes(self):
         repo = self.copy_repo()
@@ -691,6 +704,47 @@ EOF''')
         self.assertIn("READY=1/0/0", result.stdout)
         self.assertEqual(result.stderr, "")
 
+    def test_zoxide_initializes_once_after_completion_without_replacing_cd(self):
+        self.install()
+        self.shim("fzf", '[ "$*" = "--zsh" ] || exit 90')
+        self.env["_ZO_DATA_DIR"] = str(self.home / "custom directory history")
+        self.shim("zoxide", '''[ "$*" = "init zsh" ] || exit 90
+cat <<'EOF'
+typeset -g TEST_ZOXIDE_COUNT=$(( ${TEST_ZOXIDE_COUNT:-0} + 1 ))
+typeset -g TEST_ZOXIDE_AFTER_COMPINIT=$+functions[compdef]
+typeset -g TEST_ZOXIDE_BEFORE_HIGHLIGHT=$+functions[_zsh_highlight]
+__zoxide_z() { :; }
+z() { __zoxide_z "$@"; }
+zi() { :; }
+EOF''')
+        result = subprocess.run(
+            [ZSH, "-d", "-ic",
+             '. "$HOME/.zshrc"; print LOADS=$TEST_ZOXIDE_COUNT; '
+             'print ORDER=$TEST_ZOXIDE_AFTER_COMPINIT/$TEST_ZOXIDE_BEFORE_HIGHLIGHT; '
+             'print COMMANDS=$+functions[z]/$+functions[zi]/$+functions[cd]/$+aliases[cd]; '
+             'print -r -- "DATA=$_ZO_DATA_DIR"'],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("LOADS=1", result.stdout)
+        self.assertIn("ORDER=1/0", result.stdout)
+        self.assertIn("COMMANDS=1/1/0/0", result.stdout)
+        self.assertIn("DATA=" + self.env["_ZO_DATA_DIR"], result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_existing_zoxide_integration_is_not_initialized_again(self):
+        (self.home / ".zshrc").write_text("__zoxide_z() { :; }\nz() { print existing; }\n")
+        self.install()
+        self.shim("fzf", '[ "$*" = "--zsh" ] || exit 90')
+        self.shim("zoxide", 'printf "unexpected zoxide init\\n" >&2; exit 90')
+        result = subprocess.run(
+            [ZSH, "-d", "-ic", 'z'],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), "existing")
+        self.assertEqual(result.stderr, "")
+
     def test_missing_fzf_tab_plugin_warns_without_breaking_shell_startup(self):
         self.install()
         (self.home / ".config/portable-terminal/plugins/fzf-tab/fzf-tab.zsh").unlink()
@@ -814,7 +868,7 @@ class RepositoryTests(unittest.TestCase):
 
     def test_linux_lock_has_both_architectures_and_valid_sha256s(self):
         rows = [line.split("|") for line in (ROOT / "packages.lock").read_text().splitlines() if line and not line.startswith("#")]
-        self.assertEqual(len(rows), 14)
+        self.assertEqual(len(rows), 16)
         for row in rows:
             self.assertEqual(len(row), 5)
             name, arch, digest, url, binaries = row
@@ -823,6 +877,7 @@ class RepositoryTests(unittest.TestCase):
             self.assertTrue(url.startswith("https://github.com/"))
             self.assertTrue(binaries)
         self.assertEqual(len({(row[0], row[1]) for row in rows}), len(rows))
+        self.assertEqual({row[1] for row in rows if row[0] == "zoxide"}, {"x86_64", "aarch64"})
 
     def test_generated_profiles_are_reproducible(self):
         paths = [ROOT / "profiles/portable-terminal.json", ROOT / "profiles/Portable-Mocha.terminal"]
