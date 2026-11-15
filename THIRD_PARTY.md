@@ -19,7 +19,17 @@ than relying on a third-party setup script.
 - [Homebrew](https://docs.brew.sh/Manpage) documents formula installation and
   the environment switches used to avoid incidental updates and cleanup.
 - [Zsh's completion system](https://zsh.sourceforge.io/Doc/Release/Completion-System.html)
-  supplies native Tab completion.
+  supplies completion candidates for commands, flags, files, and directories.
+- [fzf-tab 1.3.0](https://github.com/Aloxaf/fzf-tab/tree/v1.3.0) displays those
+  candidates in searchable menus. Its archive is downloaded and SHA256-checked
+  on both platforms. The checksum was cross-checked against
+  [Homebrew's formula](https://github.com/Homebrew/homebrew-core/blob/HEAD/Formula/f/fzf-tab.rb).
+  Unmodified runtime helpers and the MIT licenses for fzf-tab and its bundled
+  zsh-ls-colors library are installed; the optional compiled module isn't.
+  It is loaded after fzf's shell integration and before syntax highlighting.
+- [AWS CLI command completion](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-completion.html)
+  documents the `bashcompinit` / `complete -C` integration used when an existing
+  AWS installation supplies `aws_completer` on `PATH`. AWS itself isn't installed.
 - [zsh-syntax-highlighting 0.8.0](https://github.com/zsh-users/zsh-syntax-highlighting/tree/0.8.0)
   supplies live command-line highlighting. Its archive is downloaded and
   SHA256-checked on both platforms. The checksum was cross-checked against

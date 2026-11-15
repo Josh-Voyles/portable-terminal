@@ -97,6 +97,17 @@ if ! (( $+functions[compdef] )); then
     autoload -Uz compinit
     compinit -i
 fi
+
+# AWS ships its own completion provider; never install AWS or fetch schemas here.
+if (( $+commands[aws_completer] )); then
+    if ! (( $+functions[complete] )); then
+        autoload -Uz bashcompinit
+        bashcompinit
+    fi
+    # bashcompinit evaluates -C as shell code, so quote paths containing spaces.
+    complete -C "${(q)commands[aws_completer]}" aws
+fi
+
 if command -v fzf >/dev/null 2>&1; then
     if _pt_fzf_init=$(fzf --zsh 2>/dev/null); then
         eval "$_pt_fzf_init"
@@ -107,6 +118,21 @@ if command -v fzf >/dev/null 2>&1; then
 fi
 if command -v starship >/dev/null 2>&1 && ! (( $+functions[prompt_starship_precmd] )); then
     eval "$(starship init zsh)"
+fi
+
+# Replace the selection menu, not completion providers or file/directory matches.
+# Load after fzf's Tab widget, but before syntax highlighting wraps ZLE widgets.
+if (( $+commands[fzf] )) && ! (( $+functions[fzf-tab-complete] )); then
+    if [[ -r ${XDG_CONFIG_HOME:-$HOME/.config}/portable-terminal/plugins/fzf-tab/fzf-tab.zsh ]]; then
+        zstyle ':completion:*' menu no
+        zstyle ':completion:*:descriptions' format '[%d]'
+        zstyle ':fzf-tab:*' use-fzf-default-opts yes
+        # Account for the rounded border in the shared fzf options.
+        zstyle ':fzf-tab:*' fzf-pad 4
+        source "${XDG_CONFIG_HOME:-$HOME/.config}/portable-terminal/plugins/fzf-tab/fzf-tab.zsh"
+    else
+        print -u2 -- 'portable-terminal: searchable Tab completion is missing; rerun bash install.sh --config-only.'
+    fi
 fi
 
 # Highlighting must be loaded after completion, fzf, and other ZLE widgets.

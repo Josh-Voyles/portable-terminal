@@ -6,6 +6,10 @@ ZSH_HIGHLIGHT_VERSION=0.8.0
 ZSH_HIGHLIGHT_SHA256=5981c19ebaab027e356fe1ee5284f7a021b89d4405cc53dc84b476c3aee9cc32
 ZSH_HIGHLIGHT_URL=https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/0.8.0.tar.gz
 
+FZF_TAB_VERSION=1.3.0
+FZF_TAB_SHA256=d75ac08c2c8af5a6a0478787b0f11fabbe24951973b7841ae963431e2070ee9a
+FZF_TAB_URL=https://github.com/Aloxaf/fzf-tab/archive/refs/tags/v1.3.0.tar.gz
+
 find_brew() {
     BREW=''
     if have brew; then BREW=$(command -v brew); return; fi
@@ -104,6 +108,30 @@ install_highlighting() {
     done
     for file in "$source"/highlighters/*/*-highlighter.zsh; do
         put_file "$file" "$target/${file#"$source/"}"
+    done
+}
+
+install_completion() {
+    local stage source target file mode
+    target="$DEST/plugins/fzf-tab"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Would install fzf-tab $FZF_TAB_VERSION; SHA256 $FZF_TAB_SHA256"
+        return
+    fi
+    fetch_asset "$FZF_TAB_SHA256" "$FZF_TAB_URL"
+    stage="$WORK/completion"
+    mkdir -p "$stage"
+    tar -xzf "$DOWNLOADED_ASSET" -C "$stage"
+    source="$stage/fzf-tab-$FZF_TAB_VERSION"
+    # Install runtime helpers and both MIT licenses, not the optional C module.
+    for file in fzf-tab.zsh LICENSE lib/zsh-ls-colors/ls-colors.zsh lib/zsh-ls-colors/LICENSE; do
+        put_file "$source/$file" "$target/$file"
+    done
+    for file in "$source"/lib/*; do
+        [ -f "$file" ] || continue
+        mode=600
+        if [ -x "$file" ]; then mode=700; fi
+        put_file "$file" "$target/${file#"$source/"}" "$mode"
     done
 }
 

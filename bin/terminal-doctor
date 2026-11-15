@@ -22,6 +22,16 @@ else
     printf 'MISSING  syntax highlighting (rerun the installer)\n'
     missing=$((missing + 1))
 fi
+completion="${XDG_CONFIG_HOME:-$HOME/.config}/portable-terminal/plugins/fzf-tab/fzf-tab.zsh"
+if [ -r "$completion" ]; then
+    printf 'OK       searchable Tab completion %s\n' "$completion"
+else
+    printf 'MISSING  searchable Tab completion (rerun the installer)\n'
+    missing=$((missing + 1))
+fi
+if command -v aws >/dev/null 2>&1 && ! command -v aws_completer >/dev/null 2>&1; then
+    printf 'Optional: add AWS CLI aws_completer to PATH for AWS subcommand/flag completion.\n'
+fi
 printf 'Start a fresh Zsh session with: zsh -l\n'
 
 printf '\nIcons (look for symbols, not boxes or blanks):\n'

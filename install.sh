@@ -17,7 +17,7 @@ Install Josh's Catppuccin Mocha Zsh setup on Linux or macOS.
 Zsh must already be on PATH. This installer never installs or upgrades it.
 
   --dry-run          Print the plan; no writes, downloads, or package installs
-  --config-only      Install configuration and highlighting, not tools or fonts
+  --config-only      Install configuration and shell plugins, not tools or fonts
   --no-tools         Don't install command-line tools
   --no-fonts         Don't install the Nerd Font
   --no-terminals     Don't configure Kitty or install macOS terminal profiles
@@ -155,8 +155,8 @@ elif [ "$SHELL_CHANGE" != no ]; then
     fi
 fi
 
-# Preflight before changing configuration. Highlighting is included even in
-# --config-only; its verified archive is reused from the cache on later runs.
+# Preflight before changing configuration. Shell plugins are included even in
+# --config-only; their verified archives are reused from the cache on later runs.
 if [ "$DRY_RUN" -eq 0 ]; then
     require_checksum
     require_command curl
@@ -178,6 +178,7 @@ fi
 
 log "Platform: $OS / $ARCH; shell: $ZSH"
 install_highlighting
+install_completion
 if [ "$TOOLS" -eq 1 ]; then install_tools; fi
 if [ "$FONTS" -eq 1 ]; then install_fonts; fi
 
