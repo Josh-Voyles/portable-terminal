@@ -7,7 +7,7 @@ printf 'Inherited SHELL (may be stale): %s\nTERM: %s\n' "${SHELL:-unknown}" "${T
 printf 'Character encoding: %s\n\n' "$(locale charmap 2>/dev/null || printf unknown)"
 
 missing=0
-for tool in zsh git file vim starship eza fzf bat fd rg yazi ya zoxide; do
+for tool in zsh git file vim starship eza fzf bat fd rg yazi ya zoxide tldr; do
     if command -v "$tool" >/dev/null 2>&1; then
         printf 'OK       %-10s %s\n' "$tool" "$(command -v "$tool")"
     else
