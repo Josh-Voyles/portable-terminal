@@ -15,6 +15,7 @@ $nodejs\
 $python\
 $rust\
 $golang\
+$aws\
 $cmd_duration\
 $line_break\
 $character"""
