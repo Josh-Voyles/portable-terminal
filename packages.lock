@@ -13,3 +13,5 @@ ripgrep|x86_64|33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c|
 ripgrep|aarch64|800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915|https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-musl.tar.gz|rg
 yazi|x86_64|9b9c39decccf8cb0ff53a7d637d38f8a79d93bbd0099f4ea9c619ef6bb392f5d|https://github.com/sxyazi/yazi/releases/download/v26.9.1/yazi-x86_64-unknown-linux-musl.zip|yazi ya
 yazi|aarch64|dd569daecaae914185f295634109295ccd25c1b42b02eb89a74f651970024f2e|https://github.com/sxyazi/yazi/releases/download/v26.9.1/yazi-aarch64-unknown-linux-musl.zip|yazi ya
+tealdeer|x86_64|5a9c3f0691b9cf375ee5c99de802885f3d50498cf686a539e2ddda028eb6b4f6|https://github.com/tealdeer-rs/tealdeer/releases/download/v1.9.1/tealdeer-linux-x86_64-musl|tldr
+tealdeer|aarch64|247746dd2d18f0135da79b849bb6b49e45262e2fe4318adfc3082dc6ce3ee968|https://github.com/tealdeer-rs/tealdeer/releases/download/v1.9.1/tealdeer-linux-aarch64-musl|tldr

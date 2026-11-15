@@ -10,6 +10,12 @@ than relying on a third-party setup script.
 - [Yazi installation](https://yazi-rs.github.io/docs/installation/) distinguishes
   file detection, fonts, and optional preview helpers. Official binaries come
   from [sxyazi/yazi](https://github.com/sxyazi/yazi/releases).
+- [Tealdeer's official manual](https://docs.tealdeer.org/) documents the `tldr`
+  client and its community-maintained command examples. Linux installs the
+  standalone musl binaries from the maintainers' [v1.9.1 release](https://github.com/tealdeer-rs/tealdeer/releases/tag/v1.9.1),
+  renamed to `tldr`, with SHA256 pins checked against GitHub release metadata.
+  macOS uses Homebrew's `tealdeer` formula. These primary sources define the
+  actual binaries and package name; no third-party guides were needed.
 - [iTerm2 Dynamic Profiles](https://iterm2.com/documentation-dynamic-profiles.html)
   documents the per-user directory and `Profiles`/`Name`/`Guid` fields used by
   the generated profile.

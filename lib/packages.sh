@@ -53,6 +53,7 @@ install_linux_tool() {
     case $url in
         *.tar.gz) tar -xzf "$DOWNLOADED_ASSET" -C "$stage" ;;
         *.zip) unzip -q "$DOWNLOADED_ASSET" -d "$stage" ;;
+        */tealdeer-linux-*-musl) cp "$DOWNLOADED_ASSET" "$stage/tldr" ;;
         *) die "Unknown archive format: $url" ;;
     esac
     for binary in $binaries; do
@@ -69,9 +70,10 @@ install_tools() {
         find_brew
         # Check command availability, not just Homebrew's inventory; leave other
         # package managers' working installations alone unless explicitly asked.
-        for formula in starship eza fzf bat fd ripgrep yazi; do
+        for formula in starship eza fzf bat fd ripgrep yazi tealdeer; do
             binary=$formula
             if [ "$formula" = ripgrep ]; then binary=rg; fi
+            if [ "$formula" = tealdeer ]; then binary=tldr; fi
             if [ "$REINSTALL_TOOLS" -eq 0 ] && have "$binary"; then
                 if [ "$formula" != yazi ] || have ya; then log "Keeping existing: $formula"; continue; fi
             fi

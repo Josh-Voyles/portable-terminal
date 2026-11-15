@@ -166,6 +166,7 @@ The installer never forces a global `TERM` value.
 | `ls`, `la`, `ll` | eza listings with icons; `ll` includes Git file status |
 | `tree` | Two directory levels, respecting `.gitignore` |
 | `bat file` | Syntax highlighting in matching colors; plain `cat` stays unchanged |
+| `tldr tar` | Short, practical command examples (provided by tealdeer) |
 | **Tab** | Search available subcommands, flags, files, or directories with fzf-tab |
 | **Ctrl+R** | Search shell history |
 | **Ctrl+T** | Search files, with a bat preview; **Ctrl+/** toggles it |
@@ -178,6 +179,12 @@ The prompt hides the branch outside Git repositories. Within one, `!` means
 modified, `+` staged, `?` untracked, and `↑` / `↓` ahead / behind. It shows
 language versions when relevant and command duration after two seconds.
 Your editor preference stays `vim`.
+
+Run `tldr --update` once after installation to download the community-maintained
+pages, then try `tldr tar` or `tldr git commit`. Cached pages work offline;
+rerun `tldr --update` when you want fresh examples. The installer doesn't fetch
+pages or change an existing tldr client's configuration. An existing `tldr`
+command is kept unless you pass `--reinstall-tools`.
 
 Shell command editing uses Emacs-style shortcuts, including Ctrl+A and Ctrl+E.
 This doesn't change Vim's own keybindings. Inline gray-text suggestions aren't

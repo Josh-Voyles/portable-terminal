@@ -160,10 +160,14 @@ done
         ))
         return target
 
-    def fixture_download(self, repo, *, zip_archive=False, checksum=None):
-        archive = self.base / ("asset.zip" if zip_archive else "asset.tar.gz")
+    def fixture_download(self, repo, *, zip_archive=False, raw_binary=False, arch="x86_64", checksum=None):
+        archive = self.base / (f"tealdeer-linux-{arch}-musl" if raw_binary else
+                               "asset.zip" if zip_archive else "asset.tar.gz")
         payload = b"#!/bin/sh\nprintf 'fixture tool\\n'\n"
-        if zip_archive:
+        if raw_binary:
+            archive.write_bytes(payload)
+            tool, binaries = "tealdeer", "tldr"
+        elif zip_archive:
             with zipfile.ZipFile(archive, "w") as bundle:
                 bundle.writestr("release/yazi", payload)
                 bundle.writestr("release/ya", payload)
@@ -177,7 +181,7 @@ done
             tool, binaries = "starship", "starship"
         digest = checksum or hashlib.sha256(archive.read_bytes()).hexdigest()
         (repo / "packages.lock").write_text(
-            f"{tool}|x86_64|{digest}|https://example.invalid/{archive.name}|{binaries}\n"
+            f"{tool}|{arch}|{digest}|https://example.invalid/{archive.name}|{binaries}\n"
         )
         self.env["MOCK_DOWNLOAD"] = str(archive)
         self.curl_shim('printf "download\\n" >> "$MOCK_LOG"\nwhile [ "$1" != --output ]; do shift; done\ncp "$MOCK_DOWNLOAD" "$2"')
@@ -310,6 +314,7 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
     def test_dry_run_is_offline_and_writes_nothing(self):
         result = self.run_script("install.sh", "--dry-run", "--reinstall-tools")
         self.assertIn("Would install starship", result.stdout)
+        self.assertIn("Would install tealdeer", result.stdout)
         self.assertIn("Would install fzf-tab 1.3.0", result.stdout)
         self.assertIn("Nothing was changed or downloaded", result.stdout)
         self.assertEqual(self.snapshot(), {})
@@ -515,8 +520,16 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
         self.shim("brew", 'if [ "$1" = list ]; then exit 1; fi\nprintf "%s\\n" "$*" >> "$MOCK_LOG"')
         self.run_script("install.sh", "--no-fonts", "--reinstall-tools")
         calls = self.log.read_text()
-        for formula in ["starship", "eza", "fzf", "bat", "fd", "ripgrep", "yazi"]:
+        for formula in ["starship", "eza", "fzf", "bat", "fd", "ripgrep", "yazi", "tealdeer"]:
             self.assertIn("install --formula " + formula, calls)
+
+    def test_mac_keeps_existing_tldr_instead_of_installing_tealdeer(self):
+        self.env["MOCK_OS"] = "Darwin"
+        self.shim("tldr", "exit 0")
+        self.shim("brew", 'printf "%s\\n" "$*" >> "$MOCK_LOG"')
+        result = self.run_script("install.sh", "--no-fonts")
+        self.assertIn("Keeping existing: tealdeer", result.stdout)
+        self.assertNotIn("tealdeer", self.log.read_text())
 
     def test_ptyxis_font_changes_have_restore_records(self):
         state = self.base / "settings.json"
@@ -557,6 +570,34 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
         self.run_script("install.sh", "--no-fonts", "--reinstall-tools", root=repo)
         self.assertTrue((self.home / ".local/bin/yazi").is_file())
         self.assertTrue((self.home / ".local/bin/ya").is_file())
+
+    def test_standalone_tealdeer_install_cache_preservation_and_restore(self):
+        for arch in ["x86_64", "aarch64"]:
+            with self.subTest(arch=arch):
+                self.env["MOCK_ARCH"] = arch
+                archive = self.fixture_download(self.repo, raw_binary=True, arch=arch)
+                self.run_script("install.sh", "--no-fonts", "--reinstall-tools")
+                binary = self.home / ".local/bin/tldr"
+                self.assertEqual(binary.read_bytes(), archive.read_bytes())
+                self.assertEqual(stat.S_IMODE(binary.stat().st_mode), 0o755)
+                backup = self.backups()[-1]
+                self.shim("curl", "exit 98")
+                self.run_script("install.sh", "--no-fonts", "--reinstall-tools")
+                self.env["PATH"] = str(binary.parent) + os.pathsep + self.env["PATH"]
+                binary.write_text("#!/bin/sh\n# existing client\n")
+                result = self.run_script("install.sh", "--no-fonts")
+                self.assertIn("Keeping existing: tealdeer", result.stdout)
+                self.assertIn("existing client", binary.read_text())
+                self.run_script("install.sh", "--no-fonts", "--reinstall-tools")
+                self.run_script("restore.sh", backup)
+                self.assertFalse(binary.exists())
+
+    def test_standalone_tealdeer_checksum_is_rejected(self):
+        self.fixture_download(self.repo, raw_binary=True, checksum="0" * 64)
+        result = self.run_script("install.sh", "--no-fonts", "--reinstall-tools", expected=1)
+        self.assertIn("SHA256 verification failed", result.stderr)
+        self.assertFalse((self.home / ".local/bin/tldr").exists())
+        self.assertFalse((self.home / ".zshrc").exists())
 
     def test_bad_download_checksum_is_rejected_before_dotfile_changes(self):
         repo = self.copy_repo()
@@ -814,7 +855,7 @@ class RepositoryTests(unittest.TestCase):
 
     def test_linux_lock_has_both_architectures_and_valid_sha256s(self):
         rows = [line.split("|") for line in (ROOT / "packages.lock").read_text().splitlines() if line and not line.startswith("#")]
-        self.assertEqual(len(rows), 14)
+        self.assertEqual(len(rows), 16)
         for row in rows:
             self.assertEqual(len(row), 5)
             name, arch, digest, url, binaries = row
@@ -823,6 +864,9 @@ class RepositoryTests(unittest.TestCase):
             self.assertTrue(url.startswith("https://github.com/"))
             self.assertTrue(binaries)
         self.assertEqual(len({(row[0], row[1]) for row in rows}), len(rows))
+        for tool in {row[0] for row in rows}:
+            self.assertEqual({row[1] for row in rows if row[0] == tool}, {"x86_64", "aarch64"})
+        self.assertEqual({row[4] for row in rows if row[0] == "tealdeer"}, {"tldr"})
 
     def test_generated_profiles_are_reproducible(self):
         paths = [ROOT / "profiles/portable-terminal.json", ROOT / "profiles/Portable-Mocha.terminal"]
