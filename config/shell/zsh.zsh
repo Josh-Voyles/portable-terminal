@@ -116,6 +116,10 @@ if command -v fzf >/dev/null 2>&1; then
     fi
     unset _pt_fzf_init
 fi
+# Initialize after compinit; keep cd unchanged and reuse an existing integration.
+if (( $+commands[zoxide] )) && ! (( $+functions[__zoxide_z] )); then
+    eval "$(zoxide init zsh)"
+fi
 if command -v starship >/dev/null 2>&1 && ! (( $+functions[prompt_starship_precmd] )); then
     eval "$(starship init zsh)"
 fi

@@ -10,6 +10,12 @@ than relying on a third-party setup script.
 - [Yazi installation](https://yazi-rs.github.io/docs/installation/) distinguishes
   file detection, fonts, and optional preview helpers. Official binaries come
   from [sxyazi/yazi](https://github.com/sxyazi/yazi/releases).
+- [zoxide 0.10.0 documentation](https://github.com/ajeetdsouza/zoxide/tree/v0.10.0)
+  defines Zsh initialization after `compinit`, the default `z`/`zi` commands,
+  and local database preferences. Linux musl binaries for both architectures
+  come from its [official releases](https://github.com/ajeetdsouza/zoxide/releases/tag/v0.10.0);
+  SHA256 pins were checked against GitHub's release-asset metadata. Interactive
+  selection uses the existing fzf (upstream requires fzf 0.51.0+).
 - [iTerm2 Dynamic Profiles](https://iterm2.com/documentation-dynamic-profiles.html)
   documents the per-user directory and `Profiles`/`Name`/`Guid` fields used by
   the generated profile.

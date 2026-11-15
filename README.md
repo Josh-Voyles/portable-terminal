@@ -2,8 +2,8 @@
 
 My Catppuccin Mocha setup for Linux and macOS: a two-line Starship prompt with
 Git branch/status, JetBrains Mono Nerd Font Mono, colorful file listings,
-fuzzy search, and Yazi. Both systems use Zsh, with searchable Tab completion and
-live command-line syntax highlighting.
+fuzzy search, zoxide directory jumping, and Yazi. Both systems use Zsh, with
+searchable Tab completion and live command-line syntax highlighting.
 
 Kitty keeps my existing padding, tabs, split-window shortcuts, and cursor
 settings. On a Mac, the installer also supplies matching iTerm2 and Apple
@@ -170,6 +170,8 @@ The installer never forces a global `TERM` value.
 | **Ctrl+R** | Search shell history |
 | **Ctrl+T** | Search files, with a bat preview; **Ctrl+/** toggles it |
 | **Alt+C** | Find a directory and change into it |
+| `z portable` | Jump to a frequently/recently visited directory matching `portable` |
+| `zi` | Choose a previously visited directory interactively with fzf |
 | `y` | Open Yazi; quit with `q` to change the shell's directory too |
 | `yazi` | Open Yazi without changing the shell's directory afterward |
 | `terminal-doctor` | Check commands, show sample icons, explain the branch display |
@@ -178,6 +180,14 @@ The prompt hides the branch outside Git repositories. Within one, `!` means
 modified, `+` staged, `?` untracked, and `↑` / `↓` ahead / behind. It shows
 language versions when relevant and command duration after two seconds.
 Your editor preference stays `vim`.
+
+Zoxide learns directories as you navigate, including with ordinary `cd`, which
+stays unchanged. Visit a directory first, then use `z` with part of its path;
+`z foo bar` matches both terms, and `zi foo` filters the interactive picker.
+Unlike **Alt+C**, which discovers directories under the current location,
+zoxide searches your learned directory history. That database stays local to
+each machine, isn't synced by this repo, and isn't removed by restore.
+Existing zoxide data and `_ZO_*` preferences are left alone.
 
 Shell command editing uses Emacs-style shortcuts, including Ctrl+A and Ctrl+E.
 This doesn't change Vim's own keybindings. Inline gray-text suggestions aren't
