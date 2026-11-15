@@ -1,6 +1,10 @@
 # shellcheck shell=bash disable=SC2153
 # ARCH is the global platform; arch is one row's architecture in packages.lock.
-# Downloads are pinned and checked before extraction. No fetched shell scripts.
+# Downloads are pinned and checked before extraction. No remote installer scripts.
+
+ZSH_HIGHLIGHT_VERSION=0.8.0
+ZSH_HIGHLIGHT_SHA256=5981c19ebaab027e356fe1ee5284f7a021b89d4405cc53dc84b476c3aee9cc32
+ZSH_HIGHLIGHT_URL=https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/0.8.0.tar.gz
 
 find_brew() {
     BREW=''
@@ -80,6 +84,27 @@ install_tools() {
             install_linux_tool "$name" "$expected" "$url" "$binaries"
         done < "$ROOT/packages.lock"
     fi
+}
+
+install_highlighting() {
+    local stage source target file
+    target="$DEST/plugins/zsh-syntax-highlighting"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Would install zsh-syntax-highlighting $ZSH_HIGHLIGHT_VERSION; SHA256 $ZSH_HIGHLIGHT_SHA256"
+        return
+    fi
+    fetch_asset "$ZSH_HIGHLIGHT_SHA256" "$ZSH_HIGHLIGHT_URL"
+    stage="$WORK/highlighting"
+    mkdir -p "$stage"
+    tar -xzf "$DOWNLOADED_ASSET" -C "$stage"
+    source="$stage/zsh-syntax-highlighting-$ZSH_HIGHLIGHT_VERSION"
+    # Keep upstream runtime files and its license, not screenshots or test data.
+    for file in zsh-syntax-highlighting.zsh .version .revision-hash COPYING.md; do
+        put_file "$source/$file" "$target/$file"
+    done
+    for file in "$source"/highlighters/*/*-highlighter.zsh; do
+        put_file "$file" "$target/${file#"$source/"}"
+    done
 }
 
 install_fonts() {

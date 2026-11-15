@@ -26,7 +26,7 @@ done
 [ -n "$DIRECTORY" ] || die 'Supply the private backup directory printed by install.sh.'
 [ -d "$DIRECTORY" ] || die "Backup directory not found: $DIRECTORY"
 DIRECTORY=$(CDPATH='' cd -- "$DIRECTORY" && pwd -P)
-if [ ! -f "$DIRECTORY/manifest.tsv" ] && [ ! -f "$DIRECTORY/settings.tsv" ]; then
+if [ ! -f "$DIRECTORY/manifest.tsv" ] && [ ! -f "$DIRECTORY/settings.tsv" ] && [ ! -f "$DIRECTORY/previous-shell" ]; then
     die 'No portable-terminal manifest found in that directory.'
 fi
 require_checksum
@@ -93,6 +93,11 @@ fi
 if [ "$DRY_RUN" -eq 0 ] && have fc-cache; then fc-cache -f; fi
 log 'Restore finished. Backups and download caches were retained.'
 log 'Homebrew packages and profiles already imported into Apple Terminal are not removed.'
+if [ -f "$DIRECTORY/previous-shell" ]; then
+    previous_shell=$(cat "$DIRECTORY/previous-shell")
+    validate_path "$previous_shell"
+    printf 'Login shell was not restored. To switch back manually: chsh -s %q\n' "$previous_shell"
+fi
 if [ "$skipped" -gt 0 ]; then
     warn "$skipped changed or non-file target(s) were left alone."
     exit 2

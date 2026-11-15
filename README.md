@@ -2,12 +2,13 @@
 
 My Catppuccin Mocha setup for Linux and macOS: a two-line Starship prompt with
 Git branch/status, JetBrains Mono Nerd Font Mono, colorful file listings,
-fuzzy search, and Yazi. Bash and Zsh get the same prompt and shortcuts.
+fuzzy search, and Yazi. Both systems use Zsh, with native Tab completion and
+live command-line syntax highlighting.
 
 Kitty keeps my existing padding, tabs, split-window shortcuts, and cursor
 settings. On a Mac, the installer also supplies matching iTerm2 and Apple
-Terminal profiles. It doesn't switch your shell or change which terminal
-profile is the default.
+Terminal profiles. If Zsh isn't already your login shell, installation asks
+whether to make it the default. Terminal-profile defaults stay untouched.
 
 ## Install
 
@@ -26,8 +27,14 @@ machine-specific paths, or existing dotfiles are copied into this repository.
 
 ### Requirements
 
-- Linux or macOS on x86_64 or arm64; Bash 3.2 or newer runs the installer.
-- `curl`, `tar`, and either `sha256sum` or `shasum`.
+- Linux or macOS on x86_64 or arm64.
+- **Zsh must already be installed and available as `zsh` on PATH**, including
+  its standard completion functions. macOS normally provides it. On Linux,
+  ask your administrator to install it if it's missing. The installer fails
+  before making changes when Zsh isn't available; it never installs Zsh.
+- Bash 3.2+ runs the installer and restore script. You don't need to use Bash
+  as your interactive shell or upgrade the Bash shipped with macOS.
+- `curl`, `tar`, and either `sha256sum` or `shasum`, including for `--config-only`.
 - Linux also needs `unzip` for Yazi and `xz` for the font archive.
 - macOS tool installation needs an existing [Homebrew](https://brew.sh/).
   Homebrew isn't installed automatically. Intel and Apple Silicon prefixes
@@ -40,6 +47,39 @@ into `~/.local/bin`, checks their pinned SHA256 hashes, and leaves existing
 commands alone. macOS installs missing tools through Homebrew. Fonts go into
 your account's font directory. You don't need Python to install or restore.
 
+Syntax highlighting comes from the directly loaded
+[zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
+plugin. Installation downloads its pinned, checksum-verified archive to your
+user cache, even with `--config-only`; later runs reuse the verified cache.
+Nothing is downloaded when a shell starts. Oh My Zsh, a plugin manager,
+bash-completion, and ble.sh aren't needed.
+
+### Your default shell
+
+If your account already uses Zsh, the installer leaves it alone. Otherwise it
+asks **“Make Zsh your default login shell? [y/N]”**. Pressing Enter keeps the
+current default. For unattended installs, choose one of:
+
+```sh
+bash install.sh --make-default-shell
+bash install.sh --keep-default-shell
+```
+
+Without a terminal or an explicit choice, installation stops before changes
+if the default isn't Zsh. `--dry-run` never prompts or changes your account.
+
+Changing the default uses the system's `chsh`. It needs `getent` on Linux or
+`dscacheutil` on macOS to read your account's current shell. `chsh` may ask for
+your account password, and host policy can reject the change (for example,
+if the Zsh pathname isn't approved in `/etc/shells`). The installer never
+uses sudo, edits that file, or handles your password. A failed shell change
+returns an error but keeps the installed configuration and prints its backup
+directory. Use `--keep-default-shell` if you only want the configuration.
+
+After installation, start Zsh with `zsh -l`, or log out and back in after
+changing the default. Existing terminal profiles that explicitly launch Bash
+will still do so; select the login shell or Zsh in those profiles yourself.
+
 Linux arm64 uses a glibc-based eza build because that release doesn't offer
 an arm64 musl build. Other Linux downloads use musl builds. Older Linux
 systems may still need newer libraries for a particular tool; install that
@@ -48,8 +88,8 @@ tool through your package manager and rerun if a bundled binary won't start.
 ### Useful options
 
 ```sh
-bash install.sh --config-only           # Already have tools and fonts
-bash install.sh --shell zsh             # Only add Zsh startup hooks
+bash install.sh --config-only           # Keep tools/fonts; still install highlighting
+bash install.sh --keep-default-shell    # Don't change the account's login shell
 bash install.sh --no-terminals          # Keep all terminal profiles untouched
 bash install.sh --no-yazi               # Keep your existing Yazi theme
 bash install.sh --ptyxis                # Also set Ptyxis's font on Linux
@@ -66,7 +106,7 @@ Use recent tool versions: this configuration is tested with the Linux pins
 and targets current Homebrew formulae. If an older existing tool rejects an
 option, update it or use `--reinstall-tools` rather than keeping that version.
 
-Open a new tab after installing. For an immediate check, run
+In a fresh Zsh session, run
 `~/.local/bin/terminal-doctor`. This prints tool paths, an icon sample, and
 the current Git branch if you're in a repository.
 
@@ -125,6 +165,7 @@ The installer never forces a global `TERM` value.
 | `ls`, `la`, `ll` | eza listings with icons; `ll` includes Git file status |
 | `tree` | Two directory levels, respecting `.gitignore` |
 | `bat file` | Syntax highlighting in matching colors; plain `cat` stays unchanged |
+| **Tab** | Zsh's native command, option, and argument completion |
 | **Ctrl+R** | Search shell history |
 | **Ctrl+T** | Search files, with a bat preview; **Ctrl+/** toggles it |
 | **Alt+C** | Find a directory and change into it |
@@ -136,6 +177,22 @@ The prompt hides the branch outside Git repositories. Within one, `!` means
 modified, `+` staged, `?` untracked, and `↑` / `↓` ahead / behind. It shows
 language versions when relevant and command duration after two seconds.
 Your editor preference stays `vim`.
+
+Shell command editing uses Emacs-style shortcuts, including Ctrl+A and Ctrl+E.
+This doesn't change Vim's own keybindings. Inline gray-text suggestions aren't
+enabled.
+
+Zsh saves up to roughly 50,000 history entries. An existing `HISTFILE` location
+is retained; otherwise history goes to
+`${XDG_STATE_HOME:-~/.local/state}/zsh/history`. Commands are appended promptly,
+but active tabs keep independent histories; new sessions read the combined
+saved history. Commands beginning with a space aren't saved. Don't rely on
+that to keep secrets out of logs or other programs.
+
+Existing Bash history and private Bash startup settings are left untouched.
+Old Bash commands won't automatically appear in Zsh history search. Move any
+needed personal exports or tool setup into the appropriate Zsh startup file
+yourself; don't source an entire `.bashrc` from Zsh.
 
 In Kitty, **Ctrl+Shift+E / O** creates side-by-side / stacked splits;
 **Ctrl+Shift+H / J / K / L** changes focus. **Ctrl+Shift+T** opens a tab in
@@ -155,10 +212,13 @@ doesn't add third-party Linux repositories or install large preview packages.
 
 ## What changes
 
-- Appends/replaces a marked block in `.bashrc` and the first existing Bash
-  login file (`.bash_profile`, `.bash_login`, or `.profile`). This avoids
-  masking an existing login configuration. Zsh gets a block in `.zshrc`.
-- Copies shell modules and the prompt to `~/.config/portable-terminal/`.
+- Appends/replaces one marked block in `.zshrc`. Keep it after any custom
+  completion/widget setup so syntax highlighting loads last.
+- Removes only this project's old marked blocks from `.bashrc`,
+  `.bash_profile`, `.bash_login`, and `.profile`, with backups. Unrelated
+  content and the files themselves are retained.
+- Copies the Zsh configuration, highlighting plugin, and prompt to
+  `~/.config/portable-terminal/`.
   The shell sets `STARSHIP_CONFIG` to that copy; an existing
   `~/.config/starship.toml` is left alone.
 - Replaces Yazi's `theme.toml` after backing it up, but leaves `yazi.toml`,
@@ -177,6 +237,7 @@ reused with this prompt configuration.
 `ZDOTDIR`, and `YAZI_CONFIG_HOME` are respected. Keep those variables set
 consistently when installing and launching your shell. Relative paths and
 paths containing tabs or newlines are rejected. Fish isn't configured.
+Bash interactive configuration is no longer supported.
 
 ## Backups and restore
 
@@ -204,6 +265,10 @@ installation (exit status `2`). Inspect those files before considering
 before older ones if you've made several rounds of changes.
 
 Homebrew package installs can't be rolled back by this file-based restore.
+The account's login shell isn't rolled back either. When a shell change was
+attempted, its previous value is recorded in the backup's `previous-shell`
+file; the installer and restore script print the `chsh -s ...` command for
+switching back manually. Shell history isn't part of configuration restore.
 An Apple Terminal profile you've already imported also remains in Terminal's
 preferences; remove it there if no longer wanted. Backups and download caches
 are retained, and empty directories may remain.
@@ -212,11 +277,12 @@ are retained, and empty directories may remain.
 
 After editing this repository, rerun the installer. Installed configuration
 is copied rather than symlinked, so moving the checkout doesn't break it.
-Linux versions and hashes live in `packages.lock`; fonts are pinned in
-`lib/packages.sh`. Verify new hashes against the upstream release metadata
-before changing them. Homebrew follows its own formula versions.
+Linux versions and hashes live in `packages.lock`; fonts and the highlighting
+archive are pinned in `lib/packages.sh`. Verify new hashes against upstream
+metadata or a trusted package recipe before changing them. Homebrew follows
+its own formula versions.
 
-Developers need Python **3.11+** for the offline tests and profile generator.
+Developers need Zsh and Python **3.11+** for the offline tests and profile generator.
 ShellCheck is optional but recommended:
 
 ```sh
@@ -226,20 +292,31 @@ python3 scripts/generate-profiles.py --check  # Check without modifying profiles
 ```
 
 Tests use temporary home directories and fake download/package-manager
-commands. They cover repeat installs, restore, checksum rejection, Bash/Zsh
-startup, macOS profile data, and preservation of unrelated settings. The
-macOS installer branch is simulated in those tests; native GUI/profile
-behavior still needs a smoke test on a Mac. Bash 3.2 can also be tested on
-Linux using the official `bash:3.2` container image.
+commands. They cover repeat installs, restore, checksum rejection, required
+Zsh detection, consent/default-shell handling, old Bash-hook removal, Zsh
+startup, history, the Yazi wrapper, macOS profile data, and preservation of
+unrelated settings. Unit tests mock account changes; they never call the
+host's real `chsh`. Zsh tests are required, not silently skipped.
 
-The 33 offline tests have passed under Bash 3.2 with Zsh 5.9 available, as
-well as under the host's newer Bash (where the Zsh test is skipped if absent).
-The Linux x86_64 binaries, prompt, font extraction, Kitty configuration, and
-Yazi startup have also been checked with real downloads/configuration.
+The Gitea workflow uses a disposable Linux job container and provisions Zsh
+there. It also runs a real plugin/configuration install and automatically
+changes that container's account shell, never the runner host's shell.
+The runner must support job containers. No password-handling test setup is
+added; real authentication and native macOS behavior still need manual checks.
 
-The included Gitea Actions workflow expects an `ubuntu-latest` runner with
-Python 3.11+ and Bash. Zsh and ShellCheck tests run when those commands are
-available. You can add a macOS runner for native checks.
+### Mac smoke test
+
+The tests simulate macOS installation, not native terminal behavior. On a Mac:
+
+- Check `command -v zsh`, then review `bash install.sh --dry-run`.
+- Install and confirm an already-default Zsh doesn't trigger a shell change.
+- Open a fresh Zsh login session. Check the Git prompt, Tab completion,
+  live syntax highlighting, Ctrl+R, Ctrl+T, and Option+C.
+- Check a command remains in history after closing and reopening the session.
+- Run Vim normally; check `y` changes directory after Yazi's `q`, while `Q`
+  leaves it alone.
+- Check fonts, icons, and colors in each terminal profile you use. In Kitty,
+  also check splits, tabs, and focus shortcuts.
 
 To publish, create an empty Gitea repository, then run from this directory:
 
