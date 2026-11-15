@@ -18,7 +18,7 @@ jobs:
             exit 1
           fi
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zsh python3 shellcheck curl ca-certificates git passwd unzip xz-utils
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zsh fzf python3 shellcheck curl ca-certificates git passwd unzip xz-utils
       - uses: https://github.com/actions/checkout@v4
       - name: Lint and offline tests
         run: bash scripts/check.sh
@@ -33,8 +33,9 @@ jobs:
           test "$(getent passwd "$(id -u)" | cut -d: -f7)" = "$(command -v zsh)"
           zsh -d -ic '
             setopt ERR_EXIT
-            (( $+functions[compdef] && $+functions[_zsh_highlight] ))
+            (( $+functions[compdef] && $+functions[fzf-tab-complete] && $+functions[_zsh_highlight] ))
             [[ $ZSH_HIGHLIGHT_VERSION == 0.8.0 && $EDITOR == vim ]]
             [[ $(bindkey -lL main) == "bindkey -A emacs main" ]]
+            [[ $(bindkey "^I") == *fzf-tab-complete ]]
           '
           bash install.sh --config-only --no-terminals --no-yazi --make-default-shell

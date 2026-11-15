@@ -2,7 +2,7 @@
 
 My Catppuccin Mocha setup for Linux and macOS: a two-line Starship prompt with
 Git branch/status, JetBrains Mono Nerd Font Mono, colorful file listings,
-fuzzy search, and Yazi. Both systems use Zsh, with native Tab completion and
+fuzzy search, and Yazi. Both systems use Zsh, with searchable Tab completion and
 live command-line syntax highlighting.
 
 Kitty keeps my existing padding, tabs, split-window shortcuts, and cursor
@@ -47,12 +47,13 @@ into `~/.local/bin`, checks their pinned SHA256 hashes, and leaves existing
 commands alone. macOS installs missing tools through Homebrew. Fonts go into
 your account's font directory. You don't need Python to install or restore.
 
-Syntax highlighting comes from the directly loaded
-[zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
-plugin. Installation downloads its pinned, checksum-verified archive to your
-user cache, even with `--config-only`; later runs reuse the verified cache.
-Nothing is downloaded when a shell starts. Oh My Zsh, a plugin manager,
-bash-completion, and ble.sh aren't needed.
+Searchable Tab menus come from [fzf-tab](https://github.com/Aloxaf/fzf-tab), and
+syntax highlighting comes from
+[zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting).
+Both plugins are loaded directly. Installation downloads their pinned,
+checksum-verified archives to your user cache, even with `--config-only`;
+later runs reuse the verified cache. Nothing is downloaded when a shell starts.
+Oh My Zsh, a plugin manager, bash-completion, and ble.sh aren't needed.
 
 ### Your default shell
 
@@ -88,7 +89,7 @@ tool through your package manager and rerun if a bundled binary won't start.
 ### Useful options
 
 ```sh
-bash install.sh --config-only           # Keep tools/fonts; still install highlighting
+bash install.sh --config-only           # Keep tools/fonts; still install shell plugins
 bash install.sh --keep-default-shell    # Don't change the account's login shell
 bash install.sh --no-terminals          # Keep all terminal profiles untouched
 bash install.sh --no-yazi               # Keep your existing Yazi theme
@@ -165,7 +166,7 @@ The installer never forces a global `TERM` value.
 | `ls`, `la`, `ll` | eza listings with icons; `ll` includes Git file status |
 | `tree` | Two directory levels, respecting `.gitignore` |
 | `bat file` | Syntax highlighting in matching colors; plain `cat` stays unchanged |
-| **Tab** | Zsh's native command, option, and argument completion |
+| **Tab** | Search available subcommands, flags, files, or directories with fzf-tab |
 | **Ctrl+R** | Search shell history |
 | **Ctrl+T** | Search files, with a bat preview; **Ctrl+/** toggles it |
 | **Alt+C** | Find a directory and change into it |
@@ -182,6 +183,37 @@ Shell command editing uses Emacs-style shortcuts, including Ctrl+A and Ctrl+E.
 This doesn't change Vim's own keybindings. Inline gray-text suggestions aren't
 enabled.
 
+### Searchable Tab completion
+
+Tab still completes files and directories. `fzf-tab` replaces the plain
+selection list with a searchable menu, using the completion definitions Zsh
+already has:
+
+```text
+cd <Tab>          → directories
+cat <Tab>         → files
+git <Tab>         → Git subcommands
+aws s3 <Tab>      → AWS subcommands (when aws_completer is available)
+aws s3 cp --<Tab>  → AWS flags
+```
+
+Type to filter, use the arrow keys to select, and press **Enter** to insert
+the selection without running the command. **Esc** cancels the menu. A single
+match may complete directly without opening a menu.
+
+AWS completion is enabled automatically when the AWS CLI's `aws_completer`
+is on `PATH`. The installer doesn't install AWS, configure an account, or
+change credentials. If `aws` works but `command -v aws_completer` doesn't,
+add the directory containing your AWS installation's completer to `PATH`
+before starting a new Zsh session.
+
+Other commands also need their own completion definitions; `fzf-tab` doesn't
+generate them. Existing Ctrl+R, Ctrl+T, and Alt+C shortcuts stay available.
+With `--config-only` or `--no-tools`, install `fzf` separately if needed;
+without it, ordinary Zsh Tab completion stays in place.
+
+### Shell history
+
 Zsh saves up to roughly 50,000 history entries. An existing `HISTFILE` location
 is retained; otherwise history goes to
 `${XDG_STATE_HOME:-~/.local/state}/zsh/history`. Commands are appended promptly,
@@ -193,6 +225,8 @@ Existing Bash history and private Bash startup settings are left untouched.
 Old Bash commands won't automatically appear in Zsh history search. Move any
 needed personal exports or tool setup into the appropriate Zsh startup file
 yourself; don't source an entire `.bashrc` from Zsh.
+
+### Terminal shortcuts and Yazi
 
 In Kitty, **Ctrl+Shift+E / O** creates side-by-side / stacked splits;
 **Ctrl+Shift+H / J / K / L** changes focus. **Ctrl+Shift+T** opens a tab in
@@ -217,7 +251,7 @@ doesn't add third-party Linux repositories or install large preview packages.
 - Removes only this project's old marked blocks from `.bashrc`,
   `.bash_profile`, `.bash_login`, and `.profile`, with backups. Unrelated
   content and the files themselves are retained.
-- Copies the Zsh configuration, highlighting plugin, and prompt to
+- Copies the Zsh configuration, completion/highlighting plugins, and prompt to
   `~/.config/portable-terminal/`.
   The shell sets `STARSHIP_CONFIG` to that copy; an existing
   `~/.config/starship.toml` is left alone.
@@ -277,8 +311,8 @@ are retained, and empty directories may remain.
 
 After editing this repository, rerun the installer. Installed configuration
 is copied rather than symlinked, so moving the checkout doesn't break it.
-Linux versions and hashes live in `packages.lock`; fonts and the highlighting
-archive are pinned in `lib/packages.sh`. Verify new hashes against upstream
+Linux versions and hashes live in `packages.lock`; fonts and the shell plugin
+archives are pinned in `lib/packages.sh`. Verify new hashes against upstream
 metadata or a trusted package recipe before changing them. Homebrew follows
 its own formula versions.
 
@@ -294,9 +328,10 @@ python3 scripts/generate-profiles.py --check  # Check without modifying profiles
 Tests use temporary home directories and fake download/package-manager
 commands. They cover repeat installs, restore, checksum rejection, required
 Zsh detection, consent/default-shell handling, old Bash-hook removal, Zsh
-startup, history, the Yazi wrapper, macOS profile data, and preservation of
-unrelated settings. Unit tests mock account changes; they never call the
-host's real `chsh`. Zsh tests are required, not silently skipped.
+startup, completion widget order/fallback, AWS completion, history, the Yazi
+wrapper, macOS profile data, and preservation of unrelated settings. Unit tests
+mock account changes; they never call the host's real `chsh`. Zsh tests are
+required, not silently skipped.
 
 The Gitea workflow uses a disposable Linux job container and provisions Zsh
 there. It also runs a real plugin/configuration install and automatically
@@ -310,8 +345,9 @@ The tests simulate macOS installation, not native terminal behavior. On a Mac:
 
 - Check `command -v zsh`, then review `bash install.sh --dry-run`.
 - Install and confirm an already-default Zsh doesn't trigger a shell change.
-- Open a fresh Zsh login session. Check the Git prompt, Tab completion,
-  live syntax highlighting, Ctrl+R, Ctrl+T, and Option+C.
+- Open a fresh Zsh login session. Check the Git prompt, searchable Tab menus
+  for files/directories and Git, live syntax highlighting, Ctrl+R, Ctrl+T,
+  and Option+C. If AWS is installed, check `aws s3 <Tab>` and `aws s3 cp --<Tab>`.
 - Check a command remains in history after closing and reopening the session.
 - Run Vim normally; check `y` changes directory after Yazi's `q`, while `Q`
   leaves it alone.

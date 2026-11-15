@@ -68,6 +68,30 @@ class InstallerTests(unittest.TestCase):
                 entry.size = len(payload)
                 bundle.addfile(entry, io.BytesIO(payload))
         self.env["MOCK_PLUGIN"] = str(self.plugin)
+        self.completion_plugin = self.base / "completion.tar.gz"
+        with tarfile.open(self.completion_plugin, "w:gz") as bundle:
+            for name, content in {
+                "fzf-tab.zsh": textwrap.dedent("""\
+                    fzf-tab-complete() { :; }
+                    typeset -g TEST_FZF_TAB_COUNT=$(( ${TEST_FZF_TAB_COUNT:-0} + 1 ))
+                    typeset -g TEST_FZF_TAB_AFTER_COMPINIT=$+functions[compdef]
+                    typeset -g TEST_FZF_TAB_BEFORE_HIGHLIGHT=$+functions[_zsh_highlight]
+                    typeset -g TEST_FZF_TAB_PREVIOUS_WIDGET=$(bindkey '^I')
+                    zle -N fzf-tab-complete
+                    bindkey '^I' fzf-tab-complete
+                    """),
+                "LICENSE": "fixture MIT license\n",
+                "lib/-ftb-fzf": "#!/hint/zsh\n# fixture helper\n",
+                "lib/-ftb-preview.tpl": "# fixture preview\n",
+                "lib/zsh-ls-colors/ls-colors.zsh": "# fixture\n",
+                "lib/zsh-ls-colors/LICENSE": "fixture bundled MIT license\n",
+            }.items():
+                payload = content.encode()
+                entry = tarfile.TarInfo("fzf-tab-1.3.0/" + name)
+                entry.size = len(payload)
+                entry.mode = 0o755 if name == "lib/-ftb-fzf" else 0o644
+                bundle.addfile(entry, io.BytesIO(payload))
+        self.env["MOCK_COMPLETION_PLUGIN"] = str(self.completion_plugin)
         self.repo = self.copy_repo()
         # Tests never touch the host's font caches or fetch anything from GitHub.
         self.shim("fc-cache", 'printf "fc-cache\\n" >> "$MOCK_LOG"')
@@ -85,6 +109,10 @@ class InstallerTests(unittest.TestCase):
         *zsh-syntax-highlighting*)
             while [ "$1" != --output ]; do shift; done
             cp "$MOCK_PLUGIN" "$2"
+            exit 0 ;;
+        *fzf-tab*)
+            while [ "$1" != --output ]; do shift; done
+            cp "$MOCK_COMPLETION_PLUGIN" "$2"
             exit 0 ;;
     esac
 done
@@ -123,6 +151,11 @@ done
         packages.write_text(re.sub(
             r"(?m)^ZSH_HIGHLIGHT_SHA256=.*$",
             "ZSH_HIGHLIGHT_SHA256=" + hashlib.sha256(self.plugin.read_bytes()).hexdigest(),
+            packages.read_text(),
+        ))
+        packages.write_text(re.sub(
+            r"(?m)^FZF_TAB_SHA256=.*$",
+            "FZF_TAB_SHA256=" + hashlib.sha256(self.completion_plugin.read_bytes()).hexdigest(),
             packages.read_text(),
         ))
         return target
@@ -277,6 +310,7 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
     def test_dry_run_is_offline_and_writes_nothing(self):
         result = self.run_script("install.sh", "--dry-run", "--reinstall-tools")
         self.assertIn("Would install starship", result.stdout)
+        self.assertIn("Would install fzf-tab 1.3.0", result.stdout)
         self.assertIn("Nothing was changed or downloaded", result.stdout)
         self.assertEqual(self.snapshot(), {})
         self.assertFalse(self.log.exists())
@@ -285,13 +319,20 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
     def test_config_only_installs_all_shared_files(self):
         self.install()
         for name in [".zshrc", ".config/portable-terminal/shell/zsh.zsh", ".config/yazi/theme.toml", ".local/bin/terminal-doctor",
-                     ".config/portable-terminal/plugins/zsh-syntax-highlighting/highlighters/main/main-highlighter.zsh"]:
+                     ".config/portable-terminal/plugins/zsh-syntax-highlighting/highlighters/main/main-highlighter.zsh",
+                     ".config/portable-terminal/plugins/fzf-tab/fzf-tab.zsh",
+                     ".config/portable-terminal/plugins/fzf-tab/LICENSE",
+                     ".config/portable-terminal/plugins/fzf-tab/lib/-ftb-preview.tpl",
+                     ".config/portable-terminal/plugins/fzf-tab/lib/zsh-ls-colors/ls-colors.zsh",
+                     ".config/portable-terminal/plugins/fzf-tab/lib/zsh-ls-colors/LICENSE"]:
             self.assertTrue((self.home / name).is_file(), name)
         for name in [".bashrc", ".bash_profile", ".bash_login", ".profile"]:
             self.assertFalse((self.home / name).exists(), name)
         self.assertFalse((self.home / ".config/starship.toml").exists())
         self.assertEqual((self.home / ".config/portable-terminal/starship.toml").read_bytes(), (ROOT / "config/starship.toml").read_bytes())
         self.assertTrue(os.access(self.home / ".local/bin/terminal-doctor", os.X_OK))
+        helper = self.home / ".config/portable-terminal/plugins/fzf-tab/lib/-ftb-fzf"
+        self.assertEqual(stat.S_IMODE(helper.stat().st_mode), 0o700)
 
     def test_install_is_idempotent(self):
         self.install()
@@ -417,6 +458,7 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
         self.run_script("restore.sh", self.backups()[0])
         self.assertEqual((self.home / ".zshrc").read_text(), original)
         self.assertFalse((self.home / ".config/portable-terminal/shell/zsh.zsh").exists())
+        self.assertFalse((self.home / ".config/portable-terminal/plugins/fzf-tab/fzf-tab.zsh").exists())
         self.assertFalse((self.home / ".local/bin/terminal-doctor").exists())
 
     def test_restore_preserves_later_edits_unless_forced(self):
@@ -552,6 +594,23 @@ printf "%s\\n" "$2" > "$MOCK_ACCOUNT"''')
         result = self.install(expected=1)
         self.assertIn("wrong SHA256", result.stderr)
 
+    def test_fzf_tab_checksum_is_checked_and_cached_downloads_are_offline(self):
+        packages = self.repo / "lib/packages.sh"
+        good = packages.read_text()
+        packages.write_text(re.sub(r"(?m)^FZF_TAB_SHA256=.*$", "FZF_TAB_SHA256=" + "0" * 64, good))
+        result = self.install(expected=1)
+        self.assertIn("SHA256 verification failed", result.stderr)
+        self.assertFalse((self.home / ".zshrc").exists())
+        self.assertFalse((self.home / ".config/portable-terminal/plugins/fzf-tab/fzf-tab.zsh").exists())
+        packages.write_text(good)
+        self.install()
+        self.shim("curl", "exit 98")
+        self.install()
+        cached = next((self.home / ".cache/portable-terminal").glob("*v1.3.0.tar.gz"))
+        cached.write_text("tampered")
+        result = self.install(expected=1)
+        self.assertIn("wrong SHA256", result.stderr)
+
     def test_noninteractive_shell_config_does_nothing(self):
         self.install()
         result = subprocess.run(
@@ -584,13 +643,20 @@ EOF''')
 cat <<'EOF'
 export TEST_FZF_READY=yes
 typeset -g TEST_FZF_COUNT=$(( ${TEST_FZF_COUNT:-0} + 1 ))
+test-fzf-completion() { :; }
+zle -N test-fzf-completion
+bindkey '^I' test-fzf-completion
 EOF''')
         self.shim("eza", 'exit 0')
         result = subprocess.run(
             [ZSH, "-d", "-i", "-c",
              '. "$HOME/.zshrc"; alias ll; bindkey -lL main; '
-             'printf "PROMPT=%s FZF=%s EDITOR=%s COUNTS=%s/%s/%s\\n" "$STARSHIP_SHELL" "$TEST_FZF_READY" "$EDITOR" '
-             '"$TEST_STARSHIP_COUNT" "$TEST_FZF_COUNT" "$TEST_HIGHLIGHT_COUNT"; '
+             'printf "PROMPT=%s FZF=%s EDITOR=%s COUNTS=%s/%s/%s/%s\\n" "$STARSHIP_SHELL" "$TEST_FZF_READY" "$EDITOR" '
+             '"$TEST_STARSHIP_COUNT" "$TEST_FZF_COUNT" "$TEST_FZF_TAB_COUNT" "$TEST_HIGHLIGHT_COUNT"; '
+             'bindkey "^I"; print TAB_ORDER=$TEST_FZF_TAB_AFTER_COMPINIT/$TEST_FZF_TAB_BEFORE_HIGHLIGHT; '
+             'print -r -- "TAB_PREVIOUS=$TEST_FZF_TAB_PREVIOUS_WIDGET"; '
+             'zstyle -L ":completion:*" menu; zstyle -L ":fzf-tab:*" use-fzf-default-opts; '
+             'zstyle -L ":fzf-tab:*" fzf-pad; '
              '(( $+functions[compdef] )) && print COMPLETION=yes; '
              'print HISTORY=$HISTSIZE/$SAVEHIST/$options[incappendhistory]/$options[sharehistory]'],
             env=self.env, capture_output=True, text=True, timeout=15,
@@ -598,11 +664,91 @@ EOF''')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("eza --long --all --git", result.stdout)
         self.assertIn("PROMPT=zsh FZF=yes EDITOR=vim", result.stdout)
-        self.assertIn("COUNTS=1/1/1", result.stdout)
+        self.assertIn("COUNTS=1/1/1/1", result.stdout)
         self.assertIn("bindkey -A emacs main", result.stdout)
+        self.assertIn('"^I" fzf-tab-complete', result.stdout)
+        self.assertIn("TAB_ORDER=1/0", result.stdout)
+        self.assertIn('TAB_PREVIOUS="^I" test-fzf-completion', result.stdout)
+        self.assertIn("zstyle ':completion:*' menu no", result.stdout)
+        self.assertIn("zstyle ':fzf-tab:*' use-fzf-default-opts yes", result.stdout)
+        self.assertIn("zstyle ':fzf-tab:*' fzf-pad 4", result.stdout)
         self.assertIn("COMPLETION=yes", result.stdout)
         self.assertIn("HISTORY=50000/50000/on/off", result.stdout)
         self.assertEqual(result.stderr, "")
+
+    def test_without_fzf_keeps_native_tab_completion_and_does_not_require_aws(self):
+        self.install()
+        for name in ["mkdir", "mv", "rm"]:
+            (self.tools / name).symlink_to(shutil.which(name))
+        self.env["PATH"] = str(self.tools)
+        result = subprocess.run(
+            [ZSH, "-d", "-ic",
+             'bindkey "^I"; print READY=$+functions[compdef]/$+functions[fzf-tab-complete]/$+functions[complete]'],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('"^I" expand-or-complete', result.stdout)
+        self.assertIn("READY=1/0/0", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_missing_fzf_tab_plugin_warns_without_breaking_shell_startup(self):
+        self.install()
+        (self.home / ".config/portable-terminal/plugins/fzf-tab/fzf-tab.zsh").unlink()
+        self.shim("fzf", '[ "$*" = "--zsh" ] || exit 90')
+        result = subprocess.run(
+            [ZSH, "-d", "-ic", 'bindkey "^I"; print READY=$+functions[compdef]/$+functions[_zsh_highlight]'],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('"^I" expand-or-complete', result.stdout)
+        self.assertIn("READY=1/1", result.stdout)
+        self.assertIn("searchable Tab completion is missing", result.stderr)
+
+    def test_existing_fzf_tab_plugin_is_not_loaded_twice(self):
+        (self.home / ".zshrc").write_text("fzf-tab-complete() { :; }\n")
+        self.install()
+        self.shim("fzf", '[ "$*" = "--zsh" ] || exit 90')
+        result = subprocess.run(
+            [ZSH, "-d", "-ic", 'print LOADS=${TEST_FZF_TAB_COUNT:-0}'],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("LOADS=0", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_aws_completer_is_registered_and_handles_paths_with_spaces_and_quotes(self):
+        aws_tools = self.base / "AWS tools with 'quotes'"
+        aws_tools.mkdir()
+        completer = aws_tools / "aws_completer"
+        completer.write_text("""#!/bin/sh
+case "$COMP_LINE" in
+    'aws s3 ') printf '%s\\n' cp ls sync ;;
+    'aws s3 cp --') printf '%s\\n' --recursive --dryrun ;;
+    *) exit 90 ;;
+esac
+""")
+        completer.chmod(0o755)
+        self.env["PATH"] = str(aws_tools) + os.pathsep + self.env["PATH"]
+        self.shim("fzf", '[ "$*" = "--zsh" ] || exit 90')
+        self.install()
+        result = subprocess.run(
+            [ZSH, "-d", "-ic", '''
+                [[ ${_comps[aws]} == '_bash_complete -C '* ]] || exit 91
+                compadd() { print -rl -- "$@"; }
+                words=(aws s3 '') CURRENT=3 PREFIX='' QIPREFIX='' IPREFIX=''
+                eval "${_comps[aws]}"
+                words=(aws s3 cp --) CURRENT=4 PREFIX=--
+                eval "${_comps[aws]}"
+            '''],
+            env=self.env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for candidate in ["cp", "ls", "sync", "--recursive", "--dryrun"]:
+            self.assertIn(candidate, result.stdout.splitlines())
+        self.assertEqual(result.stderr, "")
+        self.assertFalse((self.home / ".aws").exists())
+        self.assertFalse((self.home / ".local/bin/aws").exists())
+        self.assertFalse((self.home / ".local/bin/aws_completer").exists())
 
     def test_zsh_history_survives_sessions_without_importing_bash_history(self):
         self.install()
