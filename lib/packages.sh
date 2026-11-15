@@ -70,7 +70,7 @@ install_tools() {
         find_brew
         # Check command availability, not just Homebrew's inventory; leave other
         # package managers' working installations alone unless explicitly asked.
-        for formula in starship eza fzf bat fd ripgrep yazi tealdeer; do
+        for formula in starship eza fzf bat fd ripgrep yazi zoxide tealdeer; do
             binary=$formula
             if [ "$formula" = ripgrep ]; then binary=rg; fi
             if [ "$formula" = tealdeer ]; then binary=tldr; fi

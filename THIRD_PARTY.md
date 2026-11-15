@@ -16,6 +16,12 @@ than relying on a third-party setup script.
   renamed to `tldr`, with SHA256 pins checked against GitHub release metadata.
   macOS uses Homebrew's `tealdeer` formula. These primary sources define the
   actual binaries and package name; no third-party guides were needed.
+- [zoxide 0.10.0 documentation](https://github.com/ajeetdsouza/zoxide/tree/v0.10.0)
+  defines Zsh initialization after `compinit`, the default `z`/`zi` commands,
+  and local database preferences. Linux musl binaries for both architectures
+  come from its [official releases](https://github.com/ajeetdsouza/zoxide/releases/tag/v0.10.0);
+  SHA256 pins were checked against GitHub's release-asset metadata. Interactive
+  selection uses the existing fzf (upstream requires fzf 0.51.0+).
 - [iTerm2 Dynamic Profiles](https://iterm2.com/documentation-dynamic-profiles.html)
   documents the per-user directory and `Profiles`/`Name`/`Guid` fields used by
   the generated profile.
